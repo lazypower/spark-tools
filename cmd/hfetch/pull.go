@@ -251,6 +251,10 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		OnProgress:   progressFn,
 	})
 	if err != nil {
+		if !flags.jsonOutput {
+			// Ensure error is visible after \r progress output.
+			fmt.Println()
+		}
 		return err
 	}
 
@@ -295,7 +299,14 @@ func (s *apiFileSource) Head(ctx context.Context) (int64, string, error) {
 }
 
 func (s *apiFileSource) Download(ctx context.Context, offset int64) (io.ReadCloser, int64, error) {
-	return s.client.DownloadFile(ctx, s.modelID, s.file, offset)
+	rc, size, err := s.client.DownloadFile(ctx, s.modelID, s.file, offset)
+	if err != nil {
+		if api.IsRangeNotSupported(err) {
+			return nil, 0, download.ErrRangeNotSupported
+		}
+		return nil, 0, err
+	}
+	return rc, size, nil
 }
 
 // redactToken shows only the first 8 characters of a token.

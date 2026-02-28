@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,6 +17,14 @@ import (
 
 	"github.com/lazypower/spark-tools/pkg/hfetch/auth"
 )
+
+var errRangeNotSupported = errors.New("range not supported")
+
+// IsRangeNotSupported reports whether the error indicates the server
+// does not support HTTP Range requests (returned 200 instead of 206).
+func IsRangeNotSupported(err error) bool {
+	return errors.Is(err, errRangeNotSupported)
+}
 
 const (
 	defaultBaseURL     = "https://huggingface.co"
@@ -59,7 +68,12 @@ func WithBaseURL(u string) Option {
 // NewClient creates a new HuggingFace API client.
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: 30 * time.Second,
+				DisableCompression:    true, // Prevent Range+gzip conflicts with CDN redirects
+			},
+		},
 		baseURL:     defaultBaseURL,
 		apiBase:     defaultAPIBase,
 		maxRetries:  defaultMaxRetries,
@@ -191,6 +205,9 @@ func (c *Client) ListFiles(ctx context.Context, modelID string) ([]ModelFile, er
 }
 
 // HeadFile performs a HEAD request to get file size and hash without downloading.
+// It uses RoundTrip directly (no redirect following) because HuggingFace
+// returns X-Linked-Etag (the LFS SHA256) and X-Linked-Size on the initial
+// 302 response; following the redirect to the CDN loses these headers.
 func (c *Client) HeadFile(ctx context.Context, modelID, filename string) (size int64, sha256 string, err error) {
 	u := fmt.Sprintf("%s/%s/resolve/main/%s", c.baseURL, modelID, filename)
 	req, err := c.newRequest(ctx, http.MethodHead, u, nil)
@@ -198,18 +215,57 @@ func (c *Client) HeadFile(ctx context.Context, modelID, filename string) (size i
 		return 0, "", err
 	}
 
-	resp, err := c.do(req)
+	transport := c.httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		return 0, "", err
+		return 0, "", fmt.Errorf("HEAD request failed: %w", err)
 	}
 	resp.Body.Close()
 
-	size = resp.ContentLength
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return 0, "", auth.ErrAuthInvalid
+	case http.StatusForbidden:
+		return 0, "", auth.ErrGatedModel
+	case http.StatusNotFound:
+		return 0, "", fmt.Errorf("not found: %s", req.URL.Path)
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return 0, "", fmt.Errorf("HEAD request HTTP %d", resp.StatusCode)
+	}
+
+	// X-Linked-Etag is the LFS SHA256, only present on the HF response.
 	sha256 = resp.Header.Get("X-Linked-Etag")
 	if sha256 == "" {
 		sha256 = resp.Header.Get("ETag")
 	}
 	sha256 = strings.Trim(sha256, "\"")
+
+	// For redirect responses, Content-Length is the redirect body size,
+	// NOT the actual file size. Use X-Linked-Size or follow the redirect.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if v := resp.Header.Get("X-Linked-Size"); v != "" {
+			size, _ = strconv.ParseInt(v, 10, 64)
+		}
+		if size <= 0 {
+			if loc := resp.Header.Get("Location"); loc != "" {
+				cdnReq, _ := http.NewRequestWithContext(ctx, http.MethodHead, loc, nil)
+				if cdnReq != nil {
+					cdnResp, err2 := c.httpClient.Do(cdnReq)
+					if err2 == nil {
+						size = cdnResp.ContentLength
+						cdnResp.Body.Close()
+					}
+				}
+			}
+		}
+	} else {
+		size = resp.ContentLength
+	}
+
 	return size, sha256, nil
 }
 
@@ -251,6 +307,13 @@ func (c *Client) DownloadFile(ctx context.Context, modelID, filename string, off
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// If we requested a Range but got 200 (not 206), the server
+	// doesn't support Range requests (e.g. HuggingFace Xet storage).
+	if offset > 0 && resp.StatusCode == http.StatusOK {
+		resp.Body.Close()
+		return nil, 0, errRangeNotSupported
 	}
 
 	return resp.Body, resp.ContentLength, nil

@@ -37,6 +37,32 @@ func (m *mockSource) Download(_ context.Context, offset int64) (io.ReadCloser, i
 	return io.NopCloser(reader), remaining, nil
 }
 
+// noRangeSource simulates a server that ignores Range requests
+// (returns ErrRangeNotSupported for non-zero offsets).
+type noRangeSource struct {
+	data   []byte
+	sha256 string
+}
+
+func newNoRangeSource(data []byte) *noRangeSource {
+	h := sha256.Sum256(data)
+	return &noRangeSource{
+		data:   data,
+		sha256: hex.EncodeToString(h[:]),
+	}
+}
+
+func (m *noRangeSource) Head(_ context.Context) (int64, string, error) {
+	return int64(len(m.data)), m.sha256, nil
+}
+
+func (m *noRangeSource) Download(_ context.Context, offset int64) (io.ReadCloser, int64, error) {
+	if offset > 0 {
+		return nil, 0, ErrRangeNotSupported
+	}
+	return io.NopCloser(bytes.NewReader(m.data)), int64(len(m.data)), nil
+}
+
 func TestChunkState(t *testing.T) {
 	s := &ChunkState{TotalSize: 100}
 
@@ -558,5 +584,42 @@ func TestDownloadWithRateLimit(t *testing.T) {
 	}
 	if !bytes.Equal(got, data) {
 		t.Errorf("data mismatch: got %d bytes, expected %d", len(got), len(data))
+	}
+}
+
+func TestDownloadNoRangeFallback(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Use enough data that chunked download would create multiple chunks.
+	data := bytes.Repeat([]byte("no-range-fallback! "), 300) // ~5700 bytes
+	src := newNoRangeSource(data)
+
+	var events []ProgressEvent
+	path, err := Download(context.Background(), src, "norange.gguf", Options{
+		OutputDir: tmp,
+		ChunkSize: 256, // small chunks to force multi-chunk → triggers Range fallback
+		OnProgress: func(e ProgressEvent) {
+			events = append(events, e)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Download with no-range fallback: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Errorf("data mismatch: got %d bytes, expected %d", len(got), len(data))
+	}
+
+	// Verify we got progress events and completed successfully.
+	if len(events) == 0 {
+		t.Error("expected progress events")
+	}
+	lastEvent := events[len(events)-1]
+	if lastEvent.Phase != "complete" {
+		t.Errorf("last event phase: expected complete, got %q", lastEvent.Phase)
 	}
 }

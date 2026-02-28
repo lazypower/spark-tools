@@ -13,6 +13,7 @@ import (
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "hfetch: %v\n", err)
 		os.Exit(1)
 	}
 }

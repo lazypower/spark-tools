@@ -20,6 +20,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Cross-compile output
+/dist/
+
 # Test/build artifacts
 *.test
 *.out

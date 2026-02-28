@@ -102,6 +102,7 @@ func scanLocalModels(dataDir string) ([]localModel, error) {
 	}
 
 	// Walk the models directory looking for .gguf files.
+	// hfetch uses org--model flat dirs (e.g. "mradermacher--Venus-120b-v1.0-i1-GGUF").
 	err := filepath.Walk(modelsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip errors
@@ -111,12 +112,10 @@ func scanLocalModels(dataDir string) ([]localModel, error) {
 		}
 
 		// Derive repo name from path relative to modelsDir.
+		// Directory uses "--" as separator; convert back to "org/repo".
 		rel, _ := filepath.Rel(modelsDir, path)
-		parts := strings.SplitN(rel, string(os.PathSeparator), 3)
-		repo := rel
-		if len(parts) >= 2 {
-			repo = parts[0] + "/" + parts[1]
-		}
+		dir := filepath.Dir(rel)
+		repo := strings.Replace(dir, "--", "/", 1)
 
 		quant := gguf.ParseQuantFromFilename(info.Name())
 

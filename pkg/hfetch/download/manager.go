@@ -4,6 +4,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,11 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// ErrRangeNotSupported indicates the server does not support HTTP Range
+// requests. FileSource implementations should return this when a non-zero
+// offset download receives the full file instead of a partial response.
+var ErrRangeNotSupported = errors.New("server does not support Range requests")
 
 // ProgressEvent reports download progress.
 type ProgressEvent struct {
@@ -204,6 +210,14 @@ func Download(ctx context.Context, src FileSource, filename string, opts Options
 
 		select {
 		case err := <-errCh:
+			if errors.Is(err, ErrRangeNotSupported) {
+				// Server doesn't support Range requests (e.g. Xet storage).
+				// Fall back to single-stream download.
+				if err := downloadSingleStream(ctx, src, partialPath, totalSize, filename, opts); err != nil {
+					return "", err
+				}
+				goto verify
+			}
 			stateMu.Lock()
 			SaveState(statePath, state)
 			stateMu.Unlock()
@@ -229,6 +243,9 @@ verify:
 	}
 
 	if err := VerifySHA256(partialPath, expectedHash); err != nil {
+		// SHA mismatch — nuke partial and state so next attempt starts fresh.
+		os.Remove(partialPath)
+		os.Remove(statePath)
 		return "", err
 	}
 
@@ -276,6 +293,9 @@ func downloadChunk(ctx context.Context, src FileSource, partialPath string, chun
 
 		body, _, err := src.Download(ctx, chunk.start)
 		if err != nil {
+			if errors.Is(err, ErrRangeNotSupported) {
+				return err // no point retrying
+			}
 			lastErr = err
 			continue
 		}
@@ -288,29 +308,13 @@ func downloadChunk(ctx context.Context, src FileSource, partialPath string, chun
 			reader = &rateLimitedReader{r: reader, bucket: bucket}
 		}
 
-		data, err := io.ReadAll(reader)
+		data, readErr := io.ReadAll(reader)
 		body.Close()
 
-		if int64(len(data)) > 0 {
-			// Write at the correct offset in the file (pwrite-style).
-			wf, err := os.OpenFile(partialPath, os.O_WRONLY, 0644)
-			if err != nil {
-				return fmt.Errorf("opening partial for write: %w", err)
-			}
-			_, writeErr := wf.WriteAt(data, chunk.start)
-			wf.Close()
-			if writeErr != nil {
-				return fmt.Errorf("writing chunk at offset %d: %w", chunk.start, writeErr)
-			}
-
-			stateMu.Lock()
-			state.AddChunk(chunk.start, chunk.start+int64(len(data))-1)
-			SaveState(statePath, state)
-			stateMu.Unlock()
-		}
-
-		if err != nil {
-			lastErr = err
+		// Only write and mark complete if we got the FULL chunk.
+		// Partial writes would corrupt the file on retry.
+		if readErr != nil {
+			lastErr = readErr
 			continue
 		}
 
@@ -318,6 +322,22 @@ func downloadChunk(ctx context.Context, src FileSource, partialPath string, chun
 			lastErr = fmt.Errorf("short read: got %d bytes, expected %d", len(data), toRead)
 			continue
 		}
+
+		// Full chunk received — write at the correct offset.
+		wf, wfErr := os.OpenFile(partialPath, os.O_WRONLY, 0644)
+		if wfErr != nil {
+			return fmt.Errorf("opening partial for write: %w", wfErr)
+		}
+		_, writeErr := wf.WriteAt(data, chunk.start)
+		wf.Close()
+		if writeErr != nil {
+			return fmt.Errorf("writing chunk at offset %d: %w", chunk.start, writeErr)
+		}
+
+		stateMu.Lock()
+		state.AddChunk(chunk.start, chunk.end)
+		SaveState(statePath, state)
+		stateMu.Unlock()
 
 		return nil
 	}
@@ -332,6 +352,72 @@ func (s *ChunkState) isRangeDone(start, end int64) bool {
 		}
 	}
 	return false
+}
+
+// downloadSingleStream downloads the entire file as a single sequential
+// stream without Range requests. Used as a fallback when the server
+// doesn't support byte-range requests (e.g. HuggingFace Xet storage).
+func downloadSingleStream(ctx context.Context, src FileSource, partialPath string, totalSize int64, filename string, opts Options) error {
+	body, _, err := src.Download(ctx, 0)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+
+	f, err := os.OpenFile(partialPath, os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("opening partial for write: %w", err)
+	}
+	defer f.Close()
+
+	var reader io.Reader = body
+	if opts.bucket != nil {
+		reader = &rateLimitedReader{r: reader, bucket: opts.bucket}
+	}
+
+	startTime := time.Now()
+	buf := make([]byte, 256*1024) // 256KB buffer
+	var written int64
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			if _, err := f.WriteAt(buf[:n], written); err != nil {
+				return fmt.Errorf("writing at offset %d: %w", written, err)
+			}
+			written += int64(n)
+
+			if opts.OnProgress != nil {
+				elapsed := time.Since(startTime).Seconds()
+				speed := float64(written) / max(elapsed, 0.001)
+				opts.OnProgress(ProgressEvent{
+					File:           filename,
+					BytesCompleted: written,
+					BytesTotal:     totalSize,
+					Speed:          speed,
+					Phase:          "downloading",
+				})
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return fmt.Errorf("reading stream: %w", readErr)
+		}
+	}
+
+	if written != totalSize {
+		return fmt.Errorf("incomplete download: got %d bytes, expected %d", written, totalSize)
+	}
+
+	return nil
 }
 
 // checkDiskSpace verifies sufficient free space before downloading.
