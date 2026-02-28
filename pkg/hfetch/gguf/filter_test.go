@@ -86,3 +86,78 @@ func TestSortBySize(t *testing.T) {
 		t.Errorf("unexpected sort order: %v", files)
 	}
 }
+
+func TestSortByQuality(t *testing.T) {
+	files := []FileInfo{
+		{Filename: "low.gguf", BitsPerWeight: 3.44},
+		{Filename: "high.gguf", BitsPerWeight: 8.5},
+		{Filename: "med.gguf", BitsPerWeight: 4.85},
+	}
+	SortByQuality(files)
+	// Should be sorted descending by bits-per-weight (highest quality first).
+	if files[0].Filename != "high.gguf" {
+		t.Errorf("expected high.gguf first, got %s", files[0].Filename)
+	}
+	if files[1].Filename != "med.gguf" {
+		t.Errorf("expected med.gguf second, got %s", files[1].Filename)
+	}
+	if files[2].Filename != "low.gguf" {
+		t.Errorf("expected low.gguf last, got %s", files[2].Filename)
+	}
+}
+
+func TestSortByQuality_SingleElement(t *testing.T) {
+	files := []FileInfo{
+		{Filename: "only.gguf", BitsPerWeight: 4.85},
+	}
+	SortByQuality(files)
+	if files[0].Filename != "only.gguf" {
+		t.Errorf("unexpected result: %v", files)
+	}
+}
+
+func TestSortByQuality_Empty(t *testing.T) {
+	var files []FileInfo
+	SortByQuality(files) // should not panic
+}
+
+func TestQuantQualityLabel(t *testing.T) {
+	tests := []struct {
+		quant string
+		want  string
+	}{
+		{"Q4_K_M", "Best balance of quality/size"},
+		{"Q5_K_M", "Higher quality"},
+		{"Q5_K_S", "Higher quality, smaller"},
+		{"Q6_K", "Near-lossless"},
+		{"Q8_0", "Highest quality"},
+		{"Q4_K_S", "Good quality, compact"},
+		{"Q3_K_L", "Lower quality, small"},
+		{"Q3_K_M", "Low quality, very small"},
+		{"Q3_K_S", "Low quality, very small"},
+		{"Q2_K", "Lowest quality"},
+		{"IQ4_XS", "Smallest, lower quality"},
+		{"IQ4_NL", "Smallest, lower quality"},
+		{"IQ3_XXS", "Very small, low quality"},
+		{"IQ3_S", "Very small, low quality"},
+		{"IQ2_XXS", "Extremely small"},
+		{"IQ2_XS", "Extremely small"},
+		{"IQ2_S", "Extremely small"},
+		{"IQ1_S", "Minimum viable quality"},
+		{"IQ1_M", "Minimum viable quality"},
+		{"F16", "Full precision (large)"},
+		{"BF16", "Full precision (large)"},
+		{"F32", "Full precision (very large)"},
+		{"UNKNOWN_QUANT", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.quant, func(t *testing.T) {
+			got := QuantQualityLabel(tt.quant)
+			if got != tt.want {
+				t.Errorf("QuantQualityLabel(%q) = %q, want %q", tt.quant, got, tt.want)
+			}
+		})
+	}
+}

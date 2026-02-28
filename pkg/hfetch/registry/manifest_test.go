@@ -225,3 +225,164 @@ func TestGC(t *testing.T) {
 		t.Error("orphaned file should be removed by GC")
 	}
 }
+
+// ---------- StorageLayout tests ----------
+
+func TestNewStorageLayout(t *testing.T) {
+	sl := NewStorageLayout("/data/hfetch")
+	if sl.DataDir != "/data/hfetch" {
+		t.Errorf("expected DataDir /data/hfetch, got %q", sl.DataDir)
+	}
+}
+
+func TestStorageLayoutModelDir(t *testing.T) {
+	sl := NewStorageLayout("/data")
+
+	tests := []struct {
+		modelID  string
+		expected string
+	}{
+		{"bartowski/Qwen2.5-Coder-32B-GGUF", "/data/models/bartowski--Qwen2.5-Coder-32B-GGUF"},
+		{"org/simple-model", "/data/models/org--simple-model"},
+		{"no-slash-model", "/data/models/no-slash-model"},
+	}
+
+	for _, tt := range tests {
+		got := sl.ModelDir(tt.modelID)
+		if got != tt.expected {
+			t.Errorf("ModelDir(%q) = %q, want %q", tt.modelID, got, tt.expected)
+		}
+	}
+}
+
+func TestStorageLayoutFilePath(t *testing.T) {
+	sl := NewStorageLayout("/data")
+
+	got := sl.FilePath("org/model", "model-Q4_K_M.gguf")
+	expected := "/data/models/org--model/model-Q4_K_M.gguf"
+	if got != expected {
+		t.Errorf("FilePath = %q, want %q", got, expected)
+	}
+}
+
+func TestStorageLayoutPartialPath(t *testing.T) {
+	sl := NewStorageLayout("/data")
+
+	got := sl.PartialPath("org/model", "model.gguf")
+	expected := "/data/models/org--model/model.gguf.partial"
+	if got != expected {
+		t.Errorf("PartialPath = %q, want %q", got, expected)
+	}
+}
+
+func TestStorageLayoutStatePath(t *testing.T) {
+	sl := NewStorageLayout("/data")
+
+	got := sl.StatePath("org/model", "model.gguf")
+	expected := "/data/models/org--model/model.gguf.state"
+	if got != expected {
+		t.Errorf("StatePath = %q, want %q", got, expected)
+	}
+}
+
+func TestStorageLayoutManifestPath(t *testing.T) {
+	sl := NewStorageLayout("/data")
+
+	got := sl.ManifestPath()
+	expected := "/data/manifest.json"
+	if got != expected {
+		t.Errorf("ManifestPath = %q, want %q", got, expected)
+	}
+}
+
+func TestStorageLayoutEnsureModelDir(t *testing.T) {
+	tmp := t.TempDir()
+	sl := NewStorageLayout(tmp)
+
+	modelID := "org/new-model"
+	if err := sl.EnsureModelDir(modelID); err != nil {
+		t.Fatalf("EnsureModelDir: %v", err)
+	}
+
+	expectedDir := sl.ModelDir(modelID)
+	info, err := os.Stat(expectedDir)
+	if err != nil {
+		t.Fatalf("expected directory to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected a directory")
+	}
+}
+
+func TestStorageLayoutEnsureModelDirIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	sl := NewStorageLayout(tmp)
+
+	modelID := "org/model"
+	// Call twice — second call should not error.
+	if err := sl.EnsureModelDir(modelID); err != nil {
+		t.Fatalf("first EnsureModelDir: %v", err)
+	}
+	if err := sl.EnsureModelDir(modelID); err != nil {
+		t.Fatalf("second EnsureModelDir: %v", err)
+	}
+}
+
+func TestStorageLayoutEnsureModelDirCreatesNested(t *testing.T) {
+	tmp := t.TempDir()
+	sl := NewStorageLayout(filepath.Join(tmp, "deep", "nested"))
+
+	modelID := "org/model"
+	if err := sl.EnsureModelDir(modelID); err != nil {
+		t.Fatalf("EnsureModelDir: %v", err)
+	}
+
+	expectedDir := sl.ModelDir(modelID)
+	if _, err := os.Stat(expectedDir); err != nil {
+		t.Fatalf("expected nested directory to exist: %v", err)
+	}
+}
+
+// ---------- extractAuthor tests ----------
+
+func TestExtractAuthorWithSlash(t *testing.T) {
+	got := extractAuthor("bartowski/Qwen2.5-Coder-32B-GGUF")
+	if got != "bartowski" {
+		t.Errorf("expected bartowski, got %q", got)
+	}
+}
+
+func TestExtractAuthorNoSlash(t *testing.T) {
+	got := extractAuthor("model-without-org")
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestExtractAuthorEmpty(t *testing.T) {
+	got := extractAuthor("")
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestExtractAuthorMultipleSlashes(t *testing.T) {
+	got := extractAuthor("org/sub/model")
+	if got != "org" {
+		t.Errorf("expected org, got %q", got)
+	}
+}
+
+func TestExtractAuthorSlashOnly(t *testing.T) {
+	got := extractAuthor("/model")
+	if got != "" {
+		t.Errorf("expected empty string for leading slash, got %q", got)
+	}
+}
+
+func TestExtractAuthorTrailingSlash(t *testing.T) {
+	got := extractAuthor("org/")
+	if got != "org" {
+		t.Errorf("expected org, got %q", got)
+	}
+}
