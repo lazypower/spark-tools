@@ -349,6 +349,27 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	}
 }
 
+// chatTemplateTokens are control tokens that some models leak into streamed
+// output when the GGUF chat template metadata is malformed or missing.
+var chatTemplateTokens = []string{
+	"<|im_start|>",
+	"<|im_end|>",
+	"<|im_start|>assistant\n",
+	"<|im_start|>assistant",
+	"<|im_start|>user\n",
+	"<|im_start|>user",
+	"<|im_start|>system\n",
+	"<|im_start|>system",
+}
+
+// stripChatTokens removes leaked chat template control tokens from content.
+func stripChatTokens(s string) string {
+	for _, tok := range chatTemplateTokens {
+		s = strings.ReplaceAll(s, tok, "")
+	}
+	return s
+}
+
 func (m *chatModel) streamResponse() tea.Cmd {
 	return func() tea.Msg {
 		req := api.ChatCompletionRequest{
@@ -360,7 +381,10 @@ func (m *chatModel) streamResponse() tea.Cmd {
 			if len(delta.Choices) > 0 {
 				choice := delta.Choices[0]
 				if choice.Delta != nil && choice.Delta.Content != "" {
-					m.prog.Send(tokenMsg{content: choice.Delta.Content})
+					content := stripChatTokens(choice.Delta.Content)
+					if content != "" {
+						m.prog.Send(tokenMsg{content: content})
+					}
 				}
 				if choice.FinishReason != "" {
 					finishReason = choice.FinishReason
