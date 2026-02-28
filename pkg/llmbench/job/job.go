@@ -133,7 +133,12 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 		readyCancel()
 		msg := fmt.Sprintf("server not ready: %v", err)
 		if proc.Err() != nil {
-			msg = fmt.Sprintf("server crashed during startup: %v", proc.Err())
+			crashLog := proc.CrashLog(4096)
+			if crashLog != "" {
+				msg = fmt.Sprintf("server crashed during startup: %v\n%s", proc.Err(), crashLog)
+			} else {
+				msg = fmt.Sprintf("server crashed during startup: %v (log: %s)", proc.Err(), proc.LogFile)
+			}
 		}
 		result.Status = JobStatusFailed
 		result.Error = &JobError{Type: "server_start", Message: msg}

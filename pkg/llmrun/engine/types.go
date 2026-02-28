@@ -114,11 +114,12 @@ type Capabilities struct {
 
 // Process represents a running llama.cpp instance.
 type Process struct {
-	Cmd      *processHandle
-	Config   RunConfig
-	Caps     Capabilities
-	Endpoint string // API endpoint when in server mode
-	PIDFile  string
+	Cmd       *processHandle
+	Config    RunConfig
+	Caps      Capabilities
+	Endpoint  string // API endpoint when in server mode
+	PIDFile   string
+	LogFile   string // Path to the stderr/stdout log file
 	StartedAt time.Time
 }
 

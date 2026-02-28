@@ -108,6 +108,7 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		Caps:      caps,
 		Endpoint:  endpoint,
 		PIDFile:   pidFile,
+		LogFile:   logFile,
 		StartedAt: time.Now(),
 	}
 
@@ -179,6 +180,36 @@ func (p *Process) Done() <-chan struct{} {
 // Only valid after Done() is closed.
 func (p *Process) Err() error {
 	return p.Cmd.waitErr
+}
+
+// CrashLog reads the last portion of the server log file. Returns an empty
+// string if the log file is missing or unreadable. Useful for surfacing
+// why a process exited unexpectedly.
+func (p *Process) CrashLog(maxBytes int64) string {
+	if p.LogFile == "" {
+		return ""
+	}
+	f, err := os.Open(p.LogFile)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+
+	offset := int64(0)
+	if info.Size() > maxBytes {
+		offset = info.Size() - maxBytes
+	}
+	buf := make([]byte, min(info.Size(), maxBytes))
+	n, err := f.ReadAt(buf, offset)
+	if n == 0 {
+		return ""
+	}
+	return string(buf[:n])
 }
 
 // Stop gracefully shuts down the process with SIGTERM, then SIGKILL after a timeout.

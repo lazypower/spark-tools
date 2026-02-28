@@ -128,7 +128,7 @@ func serveCmd() *cobra.Command {
 				readyCancel()
 				proc.Stop()
 				if proc.Err() != nil {
-					return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+					return fmt.Errorf("llama-server crashed during startup: %w\n\n%s", proc.Err(), formatCrashLog(proc))
 				}
 				return fmt.Errorf("server failed to start: %w", err)
 			}
@@ -145,11 +145,7 @@ func serveCmd() *cobra.Command {
 				fmt.Println("\n  Shutting down...")
 				return proc.Stop()
 			case <-proc.Done():
-				fmt.Println("\n  Server process exited unexpectedly.")
-				if err := proc.Err(); err != nil {
-					return fmt.Errorf("llama-server crashed: %w", err)
-				}
-				return fmt.Errorf("llama-server exited unexpectedly")
+				return fmt.Errorf("llama-server exited unexpectedly: %w\n\n%s", proc.Err(), formatCrashLog(proc))
 			}
 		},
 	}

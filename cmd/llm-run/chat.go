@@ -212,7 +212,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
 			readyCancel()
 			if proc.Err() != nil {
-				return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+				return fmt.Errorf("llama-server crashed during startup: %w\n\n%s", proc.Err(), formatCrashLog(proc))
 			}
 			return fmt.Errorf("server failed to start: %w", err)
 		}
@@ -258,7 +258,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 	if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
 		readyCancel()
 		if proc.Err() != nil {
-			return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+			return fmt.Errorf("llama-server crashed during startup: %w\n\n%s", proc.Err(), formatCrashLog(proc))
 		}
 		return fmt.Errorf("server failed to start: %w", err)
 	}
@@ -330,6 +330,15 @@ func gpuName(hw *hardware.HardwareInfo) string {
 		return ""
 	}
 	return hw.GPUs[0].Name
+}
+
+// formatCrashLog reads the tail of the server log and formats it for display.
+func formatCrashLog(proc *engine.Process) string {
+	log := proc.CrashLog(4096)
+	if log == "" {
+		return fmt.Sprintf("  Log file: %s", proc.LogFile)
+	}
+	return fmt.Sprintf("  --- server log (last 4KB) ---\n%s\n  --- end log ---\n  Full log: %s", log, proc.LogFile)
 }
 
 func printServerHeader(modelRef, quant string, cfg engine.RunConfig, hw *hardware.HardwareInfo) {
