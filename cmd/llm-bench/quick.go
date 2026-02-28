@@ -14,7 +14,6 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmbench/job"
 	"github.com/lazypower/spark-tools/pkg/llmbench/prompts"
 	"github.com/lazypower/spark-tools/pkg/llmbench/report"
-	"github.com/lazypower/spark-tools/pkg/llmbench/suite"
 	"github.com/lazypower/spark-tools/pkg/llmrun"
 )
 
@@ -106,37 +105,4 @@ func quickCmd() *cobra.Command {
 	cmd.Flags().IntVar(&nPrompts, "prompts", 10, "Number of measurement prompts")
 
 	return cmd
-}
-
-// synthetic creates a minimal BenchmarkSuite for quick benchmarks.
-func synthetic(modelRef, quant string, ctxSizes []int, nPrompts int) *suite.BenchmarkSuite {
-	return &suite.BenchmarkSuite{
-		Name: "Quick Benchmark",
-		Defaults: suite.JobDefaults{
-			WarmupPrompts:  3,
-			MeasurePrompts: nPrompts,
-			MaxTokens:      512,
-			CooldownSeconds: 0,
-			Timeout:         suite.Duration{Duration: 5 * time.Minute},
-		},
-		Models: []suite.ModelSpec{
-			{
-				Name:   modelRef,
-				Ref:    modelRef,
-				Quants: []string{quant},
-				Alias:  "quick",
-			},
-		},
-		Scenarios: []suite.Scenario{
-			{
-				Name:          "quick",
-				ContextSizes:  ctxSizes,
-				BatchSizes:    []int{512},
-				ParallelSlots: []int{1},
-				Prompts:       suite.PromptSet{Builtin: "short"},
-				MaxTokens:     512,
-				Repeat:        1,
-			},
-		},
-	}
 }

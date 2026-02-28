@@ -2,6 +2,7 @@
 /hfetch
 /llm-run
 /llm-bench
+/hfetch-*
 *.exe
 
 # Go
@@ -27,3 +28,6 @@ Thumbs.db
 *.test
 *.out
 coverage.html
+
+# Scratch
+/bugs/
