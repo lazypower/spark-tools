@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lazypower/spark-tools/pkg/llmrun/api"
 )
@@ -189,21 +190,33 @@ func (m *chatModel) View() string {
 	}))
 	b.WriteString("\n\n")
 
+	// Content width: terminal width minus indent (2) and a small right margin (2).
+	contentWidth := m.width - 4
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
+	// Label takes ~12 chars ("Assistant: "); body wraps within the remainder.
+	bodyWidth := contentWidth - 12
+	if bodyWidth < 30 {
+		bodyWidth = 30
+	}
+	wrapStyle := lipgloss.NewStyle().Width(bodyWidth)
+
 	// Messages
 	for _, msg := range m.messages {
 		switch msg.Role {
 		case "system":
 			b.WriteString(fmt.Sprintf("  %s %s\n\n",
 				systemLabelStyle.Render("System:"),
-				dimStyle.Render(msg.Content)))
+				dimStyle.Render(wrapStyle.Render(msg.Content))))
 		case "user":
 			b.WriteString(fmt.Sprintf("  %s %s\n\n",
 				userLabelStyle.Render("You:"),
-				msg.Content))
+				wrapStyle.Render(msg.Content)))
 		case "assistant":
 			b.WriteString(fmt.Sprintf("  %s %s\n\n",
 				assistantLabelStyle.Render("Assistant:"),
-				msg.Content))
+				wrapStyle.Render(msg.Content)))
 		}
 	}
 
@@ -211,7 +224,7 @@ func (m *chatModel) View() string {
 	if m.streaming {
 		b.WriteString(fmt.Sprintf("  %s %s",
 			assistantLabelStyle.Render("Assistant:"),
-			m.streamBuf.String()))
+			wrapStyle.Render(m.streamBuf.String())))
 		b.WriteString(dimStyle.Render("▊"))
 		b.WriteString("\n\n")
 	}
