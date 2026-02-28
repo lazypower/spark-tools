@@ -113,20 +113,44 @@ func serveCmd() *cobra.Command {
 			}
 
 			endpoint := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-			if err := engine.WaitForReady(context.Background(), endpoint, 120*time.Second); err != nil {
+
+			// Cancel readiness polling if the process dies.
+			readyCtx, readyCancel := context.WithCancel(context.Background())
+			go func() {
+				select {
+				case <-proc.Done():
+					readyCancel()
+				case <-readyCtx.Done():
+				}
+			}()
+
+			if err := engine.WaitForReady(readyCtx, endpoint, 120*time.Second); err != nil {
+				readyCancel()
 				proc.Stop()
+				if proc.Err() != nil {
+					return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+				}
 				return fmt.Errorf("server failed to start: %w", err)
 			}
+			readyCancel()
 
 			fmt.Println("  Server ready.")
 
-			// Wait for signal.
+			// Wait for signal or unexpected process exit.
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			<-sigCh
 
-			fmt.Println("\n  Shutting down...")
-			return proc.Stop()
+			select {
+			case <-sigCh:
+				fmt.Println("\n  Shutting down...")
+				return proc.Stop()
+			case <-proc.Done():
+				fmt.Println("\n  Server process exited unexpectedly.")
+				if err := proc.Err(); err != nil {
+					return fmt.Errorf("llama-server crashed: %w", err)
+				}
+				return fmt.Errorf("llama-server exited unexpectedly")
+			}
 		},
 	}
 

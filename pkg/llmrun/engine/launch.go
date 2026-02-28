@@ -88,12 +88,22 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		endpoint = fmt.Sprintf("http://%s:%d", host, port)
 	}
 
+	handle := &processHandle{
+		pid:    cmd.Process.Pid,
+		cmd:    cmd,
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+
+	// Background reaper: immediately wait on the child so it never becomes
+	// a zombie. The exit status is captured for later retrieval via Wait/Stop.
+	go func() {
+		handle.waitErr = cmd.Wait()
+		close(handle.done)
+	}()
+
 	proc := &Process{
-		Cmd: &processHandle{
-			pid:    cmd.Process.Pid,
-			cmd:    cmd,
-			cancel: cancel,
-		},
+		Cmd:       handle,
 		Config:    cfg,
 		Caps:      caps,
 		Endpoint:  endpoint,
@@ -146,21 +156,43 @@ func checkPIDFile(pidFile string, cfg RunConfig) error {
 
 // Wait blocks until the process exits.
 func (p *Process) Wait() error {
-	if p.Cmd == nil || p.Cmd.cmd == nil {
+	if p.Cmd == nil || p.Cmd.done == nil {
 		return fmt.Errorf("process not started")
 	}
-	err := p.Cmd.cmd.Wait()
-	// Clean up PID file.
-	if p.PIDFile != "" {
-		os.Remove(p.PIDFile)
+	<-p.Cmd.done
+	p.cleanup()
+	return p.Cmd.waitErr
+}
+
+// Done returns a channel that is closed when the process exits.
+// Callers can select on this to detect unexpected crashes.
+func (p *Process) Done() <-chan struct{} {
+	if p.Cmd == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
 	}
-	return err
+	return p.Cmd.done
+}
+
+// Err returns the process exit error, or nil if still running.
+// Only valid after Done() is closed.
+func (p *Process) Err() error {
+	return p.Cmd.waitErr
 }
 
 // Stop gracefully shuts down the process with SIGTERM, then SIGKILL after a timeout.
 func (p *Process) Stop() error {
 	if p.Cmd == nil {
 		return fmt.Errorf("process not started")
+	}
+
+	// Already exited — just clean up.
+	select {
+	case <-p.Cmd.done:
+		p.cleanup()
+		return nil
+	default:
 	}
 
 	proc, err := os.FindProcess(p.Cmd.pid)
@@ -176,13 +208,8 @@ func (p *Process) Stop() error {
 	}
 
 	// Wait up to 10 seconds for graceful exit.
-	done := make(chan error, 1)
-	go func() {
-		done <- p.Cmd.cmd.Wait()
-	}()
-
 	select {
-	case <-done:
+	case <-p.Cmd.done:
 		p.cleanup()
 		return nil
 	case <-time.After(10 * time.Second):
@@ -191,7 +218,7 @@ func (p *Process) Stop() error {
 			p.cleanup()
 			return nil
 		}
-		<-done
+		<-p.Cmd.done
 		p.cleanup()
 		return nil
 	}

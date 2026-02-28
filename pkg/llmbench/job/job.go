@@ -119,15 +119,28 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 		proc.Stop()
 	}()
 
-	// Wait for server ready
+	// Wait for server ready, cancelling early if the process dies.
 	readyCtx, readyCancel := context.WithTimeout(ctx, e.startupTimeout)
-	defer readyCancel()
+	go func() {
+		select {
+		case <-proc.Done():
+			readyCancel()
+		case <-readyCtx.Done():
+		}
+	}()
+
 	if err := engine.WaitForReady(readyCtx, proc.Endpoint, e.startupTimeout); err != nil {
+		readyCancel()
+		msg := fmt.Sprintf("server not ready: %v", err)
+		if proc.Err() != nil {
+			msg = fmt.Sprintf("server crashed during startup: %v", proc.Err())
+		}
 		result.Status = JobStatusFailed
-		result.Error = &JobError{Type: "server_start", Message: fmt.Sprintf("server not ready: %v", err)}
+		result.Error = &JobError{Type: "server_start", Message: msg}
 		result.Duration = Duration{time.Since(start)}
 		return result
 	}
+	readyCancel()
 	result.ModelLoadTimeMs = float64(time.Since(start).Milliseconds())
 
 	endpoint := proc.Endpoint

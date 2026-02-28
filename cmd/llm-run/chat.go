@@ -199,9 +199,24 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		defer proc.Stop()
 
 		endpoint := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-		if err := engine.WaitForReady(context.Background(), endpoint, 60*time.Second); err != nil {
+
+		readyCtx, readyCancel := context.WithCancel(context.Background())
+		go func() {
+			select {
+			case <-proc.Done():
+				readyCancel()
+			case <-readyCtx.Done():
+			}
+		}()
+
+		if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
+			readyCancel()
+			if proc.Err() != nil {
+				return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+			}
 			return fmt.Errorf("server failed to start: %w", err)
 		}
+		readyCancel()
 
 		client := api.NewClient(endpoint)
 		return tui.RunChat(tui.ChatConfig{
@@ -230,9 +245,24 @@ func runInference(modelRef string, flags inferenceFlags) error {
 	defer proc.Stop()
 
 	endpoint := fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port)
-	if err := engine.WaitForReady(context.Background(), endpoint, 60*time.Second); err != nil {
+
+	readyCtx, readyCancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-proc.Done():
+			readyCancel()
+		case <-readyCtx.Done():
+		}
+	}()
+
+	if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
+		readyCancel()
+		if proc.Err() != nil {
+			return fmt.Errorf("llama-server crashed during startup: %w", proc.Err())
+		}
 		return fmt.Errorf("server failed to start: %w", err)
 	}
+	readyCancel()
 
 	// Read prompt.
 	prompt := flags.prompt

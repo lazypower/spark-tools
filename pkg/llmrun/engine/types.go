@@ -124,9 +124,15 @@ type Process struct {
 
 // processHandle wraps the os/exec Cmd for testability.
 type processHandle struct {
-	pid int
-	cmd interface{ Wait() error }
+	pid    int
+	cmd    interface{ Wait() error }
 	cancel func()
+
+	// Background reaper: Launch spawns a goroutine that calls cmd.Wait()
+	// immediately. The result lands in waitErr and done is closed, preventing
+	// zombie processes regardless of what the caller does.
+	done    chan struct{}
+	waitErr error
 }
 
 // HealthStatus represents the health of a running server.
