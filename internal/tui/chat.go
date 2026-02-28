@@ -367,27 +367,58 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 
 // chatStopSequences are sent to llama-server to prevent chat template
 // control tokens from being generated in the first place. This is the
-// primary defense against template leakage.
+// primary defense against template leakage. Covers multiple template
+// families since we can't know what the GGUF metadata says.
 var chatStopSequences = []string{
+	// ChatML
 	"<|im_start|>",
 	"<|im_end|>",
+	// Llama 3
+	"<|start_header_id|>",
+	"<|end_header_id|>",
+	"<|eot_id|>",
 }
 
 // roleBoundaryMarkers are role-change markers that indicate the model is
 // hallucinating a new conversation turn. If any of these appear mid-stream,
 // we hard-stop generation and discard the leaked segment.
+//
+// Ordered longest-first so the first match captures the most specific marker.
 var roleBoundaryMarkers = []string{
+	// ChatML
 	"<|im_start|>user",
 	"<|im_start|>system",
 	"<|im_start|>assistant",
+	// Llama 3
+	"<|start_header_id|>user",
+	"<|start_header_id|>system",
+	"<|start_header_id|>assistant",
+	// Alpaca / text-style templates (lower confidence but high signal)
+	"\n### Instruction:",
+	"\n### Response:",
+	"\n### Human:",
+	"\n### Assistant:",
+}
+
+// cosmeticTokens are control tokens stripped as a last-resort fallback
+// after server-side stops and boundary detection.
+var cosmeticTokens = []string{
+	// ChatML
+	"<|im_start|>",
+	"<|im_end|>",
+	// Llama 3
+	"<|start_header_id|>",
+	"<|end_header_id|>",
+	"<|eot_id|>",
 }
 
 // stripChatTokens removes residual chat template tokens from content.
 // This is a cosmetic fallback — the server-side stop sequences and hard
 // boundary check are the primary defenses.
 func stripChatTokens(s string) string {
-	s = strings.ReplaceAll(s, "<|im_start|>", "")
-	s = strings.ReplaceAll(s, "<|im_end|>", "")
+	for _, tok := range cosmeticTokens {
+		s = strings.ReplaceAll(s, tok, "")
+	}
 	return s
 }
 

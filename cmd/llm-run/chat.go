@@ -281,7 +281,10 @@ func runInference(modelRef string, flags inferenceFlags) error {
 	req := api.ChatCompletionRequest{
 		Messages:  []api.Message{{Role: "user", Content: prompt}},
 		MaxTokens: flags.maxTokens,
-		Stop:      []string{"<|im_start|>", "<|im_end|>"},
+		Stop: []string{
+			"<|im_start|>", "<|im_end|>",
+			"<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>",
+		},
 	}
 	if flags.format != "" {
 		req.ResponseFormat = &api.ResponseFormat{Type: flags.format}
