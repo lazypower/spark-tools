@@ -39,6 +39,9 @@ type RunConfig struct {
 	// Prompt
 	SystemPrompt string `json:"systemPrompt,omitempty"`
 
+	// Chat template
+	ChatTemplate string `json:"chatTemplate,omitempty"` // Override GGUF chat template (e.g. "chatml")
+
 	// Advanced
 	FlashAttention bool         `json:"flashAttention,omitempty"`
 	MMap           bool         `json:"mmap,omitempty"`

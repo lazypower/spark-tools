@@ -141,9 +141,12 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.genTokens = msg.usage.CompletionTokens
 		}
 
-		// Warn if generation was truncated by token limit.
-		if msg.finishReason == "length" {
+		// Warn on non-clean finish reasons.
+		switch msg.finishReason {
+		case "length":
 			m.err = fmt.Errorf("response truncated (hit token limit)")
+		case "boundary":
+			m.err = fmt.Errorf("response truncated (model emitted role boundary marker)")
 		}
 		return m, nil
 
@@ -349,38 +352,77 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	}
 }
 
-// chatTemplateTokens are control tokens that some models leak into streamed
-// output when the GGUF chat template metadata is malformed or missing.
-var chatTemplateTokens = []string{
+// chatStopSequences are sent to llama-server to prevent chat template
+// control tokens from being generated in the first place. This is the
+// primary defense against template leakage.
+var chatStopSequences = []string{
 	"<|im_start|>",
 	"<|im_end|>",
-	"<|im_start|>assistant\n",
-	"<|im_start|>assistant",
-	"<|im_start|>user\n",
-	"<|im_start|>user",
-	"<|im_start|>system\n",
-	"<|im_start|>system",
 }
 
-// stripChatTokens removes leaked chat template control tokens from content.
+// roleBoundaryMarkers are role-change markers that indicate the model is
+// hallucinating a new conversation turn. If any of these appear mid-stream,
+// we hard-stop generation and discard the leaked segment.
+var roleBoundaryMarkers = []string{
+	"<|im_start|>user",
+	"<|im_start|>system",
+	"<|im_start|>assistant",
+}
+
+// stripChatTokens removes residual chat template tokens from content.
+// This is a cosmetic fallback — the server-side stop sequences and hard
+// boundary check are the primary defenses.
 func stripChatTokens(s string) string {
-	for _, tok := range chatTemplateTokens {
-		s = strings.ReplaceAll(s, tok, "")
-	}
+	s = strings.ReplaceAll(s, "<|im_start|>", "")
+	s = strings.ReplaceAll(s, "<|im_end|>", "")
 	return s
+}
+
+// checkBoundary tests whether accumulated content contains a role boundary
+// marker. Returns the clean content up to the boundary (if any) and whether
+// a boundary was hit.
+func checkBoundary(accumulated string) (clean string, hit bool) {
+	for _, marker := range roleBoundaryMarkers {
+		if idx := strings.Index(accumulated, marker); idx >= 0 {
+			return accumulated[:idx], true
+		}
+	}
+	return accumulated, false
 }
 
 func (m *chatModel) streamResponse() tea.Cmd {
 	return func() tea.Msg {
 		req := api.ChatCompletionRequest{
 			Messages: m.messages,
+			Stop:     chatStopSequences,
 		}
 
+		// Track accumulated raw content for boundary detection.
+		var rawBuf strings.Builder
 		var finishReason string
-		usage, err := m.client.ChatCompletionStream(context.Background(), req, func(delta api.StreamDelta) {
+		var boundaryHit bool
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		usage, err := m.client.ChatCompletionStream(ctx, req, func(delta api.StreamDelta) {
+			if boundaryHit {
+				return // discard everything after boundary
+			}
 			if len(delta.Choices) > 0 {
 				choice := delta.Choices[0]
 				if choice.Delta != nil && choice.Delta.Content != "" {
+					rawBuf.WriteString(choice.Delta.Content)
+
+					// Hard boundary: if a role marker appears, the model is
+					// hallucinating a new turn. Truncate and cancel.
+					if _, hit := checkBoundary(rawBuf.String()); hit {
+						boundaryHit = true
+						finishReason = "boundary"
+						cancel()
+						return
+					}
+
 					content := stripChatTokens(choice.Delta.Content)
 					if content != "" {
 						m.prog.Send(tokenMsg{content: content})
@@ -392,7 +434,8 @@ func (m *chatModel) streamResponse() tea.Cmd {
 			}
 		})
 
-		if err != nil {
+		// Context cancellation from boundary detection is not an error.
+		if err != nil && !boundaryHit {
 			return streamErrMsg{err: err}
 		}
 

@@ -104,6 +104,11 @@ func BuildCommand(cfg RunConfig, caps Capabilities) (cmd []string, warnings []st
 		}
 	}
 
+	// --- Chat template override ---
+	if cfg.ChatTemplate != "" {
+		cmd = append(cmd, "--chat-template", cfg.ChatTemplate)
+	}
+
 	// --- System prompt ---
 	if cfg.SystemPrompt != "" {
 		cmd = append(cmd, "--system-prompt", cfg.SystemPrompt)
