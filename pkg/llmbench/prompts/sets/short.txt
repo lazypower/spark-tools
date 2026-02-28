@@ -1,0 +1,39 @@
+What is the capital of France? Respond in one sentence.
+---
+Explain what a hash table is in two sentences.
+---
+Write a haiku about programming.
+---
+What is the difference between TCP and UDP? Keep it brief.
+---
+Name three benefits of unit testing.
+---
+What does the acronym REST stand for in web development?
+---
+Explain recursion in one sentence.
+---
+What is a binary search tree? Answer briefly.
+---
+List three popular programming languages and their primary use cases.
+---
+What is the purpose of a load balancer? One sentence.
+---
+Define "polymorphism" in object-oriented programming.
+---
+What is the time complexity of binary search?
+---
+Explain what DNS does in one paragraph.
+---
+What is the difference between a stack and a queue?
+---
+Name two advantages of using containers like Docker.
+---
+What is an API endpoint? Explain briefly.
+---
+What does ACID stand for in database systems?
+---
+Explain the concept of "immutability" in functional programming.
+---
+What is a deadlock in concurrent programming?
+---
+Describe the purpose of version control in one sentence.

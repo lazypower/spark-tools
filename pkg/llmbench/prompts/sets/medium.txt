@@ -1,0 +1,29 @@
+Explain the CAP theorem in distributed systems. Cover what each letter stands for, why you can only guarantee two of the three properties, and give a real-world example of a system that prioritizes availability over consistency. Respond in three to four paragraphs.
+---
+Describe how garbage collection works in modern programming languages. Compare mark-and-sweep with generational garbage collection, discussing the tradeoffs between pause time and throughput. Include examples of languages that use each approach.
+---
+Explain the difference between symmetric and asymmetric encryption. Describe a practical scenario where both are used together, such as TLS handshakes. Cover key exchange, session keys, and why hybrid approaches are preferred.
+---
+What is the difference between horizontal and vertical scaling? Discuss the advantages and disadvantages of each approach, including cost considerations, complexity, and failure modes. Give examples of when you would choose one over the other.
+---
+Describe the MapReduce programming model. Explain the map phase, the shuffle and sort phase, and the reduce phase with a concrete example such as word counting across a large text corpus. Discuss its limitations.
+---
+Explain how a B-tree index works in a relational database. Cover the structure of the tree, how insertions and deletions maintain balance, and why B-trees are preferred over binary search trees for disk-based storage systems.
+---
+Describe the OAuth 2.0 authorization flow for a web application. Cover the roles of the resource owner, client, authorization server, and resource server. Walk through the authorization code grant type step by step.
+---
+Explain the concept of eventual consistency in distributed databases. Compare it with strong consistency, discuss the challenges it presents for application developers, and describe techniques like conflict resolution and vector clocks.
+---
+Describe how a container orchestration system like Kubernetes manages workloads. Cover pods, services, deployments, and replica sets. Explain how rolling updates work and how the system handles node failures.
+---
+Explain the principles behind the SOLID design principles in object-oriented programming. Give a brief description of each principle with a code-level example of how violating it leads to maintenance problems.
+---
+Describe how a CDN (Content Delivery Network) works. Cover edge caching, origin servers, cache invalidation strategies, and how CDNs handle dynamic content. Explain the benefits for both latency and reliability.
+---
+Explain the concept of database sharding. Describe horizontal partitioning strategies, including hash-based and range-based sharding. Discuss the challenges of cross-shard queries and rebalancing.
+---
+Describe the event sourcing pattern in software architecture. Explain how it differs from traditional CRUD approaches, cover event stores, projections, and snapshots. Discuss when event sourcing is appropriate and when it adds unnecessary complexity.
+---
+Explain how TLS 1.3 improves upon TLS 1.2. Cover the reduced handshake round trips, the removal of legacy cipher suites, and the introduction of 0-RTT resumption. Discuss the security implications of each change.
+---
+Describe the actor model of concurrent computation. Explain how actors communicate via message passing, how this avoids shared mutable state, and compare it with thread-based concurrency. Give examples of systems or languages that implement this model.
