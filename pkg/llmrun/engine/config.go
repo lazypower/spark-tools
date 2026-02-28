@@ -114,7 +114,7 @@ func BuildCommand(cfg RunConfig, caps Capabilities) (cmd []string, warnings []st
 	// FlashAttention: graceful degradation.
 	if cfg.FlashAttention {
 		if caps.FlashAttention {
-			cmd = append(cmd, "--flash-attn")
+			cmd = append(cmd, "--flash-attn", "on")
 		} else {
 			warnings = append(warnings, "flash attention requested but not supported by this llama.cpp build; omitting --flash-attn")
 		}
