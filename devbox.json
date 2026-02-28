@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": ["go@1.25.7"],
+  "shell": {
+    "init_hook": [],
+    "scripts": {
+      "build": ["go build ./..."],
+      "test": ["go test ./..."],
+      "hfetch": ["go build -o hfetch ./cmd/hfetch && echo 'Built: ./hfetch'"],
+      "llm-run": ["go build -o llm-run ./cmd/llm-run && echo 'Built: ./llm-run'"],
+      "llm-bench": ["go build -o llm-bench ./cmd/llm-bench && echo 'Built: ./llm-bench'"]
+    }
+  }
+}

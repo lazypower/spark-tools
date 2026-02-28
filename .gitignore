@@ -1,0 +1,26 @@
+# Binaries
+/hfetch
+/llm-run
+/llm-bench
+*.exe
+
+# Go
+/vendor/
+
+# Devbox
+.devbox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test/build artifacts
+*.test
+*.out
+coverage.html
