@@ -105,7 +105,12 @@ func scanLocalModels(dataDir string) ([]localModel, error) {
 	// hfetch uses org--model flat dirs (e.g. "mradermacher--Venus-120b-v1.0-i1-GGUF").
 	err := filepath.Walk(modelsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			// Permission errors on individual files are non-fatal — skip the
+			// entry but keep walking. Errors on the root are fatal.
+			if path == modelsDir {
+				return err
+			}
+			return nil
 		}
 		if info.IsDir() || !strings.HasSuffix(info.Name(), ".gguf") {
 			return nil

@@ -211,6 +211,11 @@ func (c *Client) readSSEStream(body io.Reader, handler func(StreamDelta)) (*Usag
 			continue // skip malformed chunks
 		}
 
+		// Capture usage from the final chunk (per OpenAI SSE spec).
+		if delta.Usage != nil {
+			usage = *delta.Usage
+		}
+
 		handler(delta)
 	}
 

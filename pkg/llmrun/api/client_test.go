@@ -133,7 +133,7 @@ func TestChatCompletionStream(t *testing.T) {
 		flusher := w.(http.Flusher)
 
 		chunks := []string{"Hello", " ", "world", "!"}
-		for i, chunk := range chunks {
+		for _, chunk := range chunks {
 			delta := StreamDelta{
 				ID:    "chatcmpl-1",
 				Model: "test-model",
@@ -144,8 +144,21 @@ func TestChatCompletionStream(t *testing.T) {
 			data, _ := json.Marshal(delta)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
-			_ = i
 		}
+
+		// Final chunk with finish_reason and usage (per OpenAI SSE spec).
+		finalDelta := StreamDelta{
+			ID:    "chatcmpl-1",
+			Model: "test-model",
+			Choices: []Choice{
+				{Index: 0, Delta: &Message{}, FinishReason: "stop"},
+			},
+			Usage: &Usage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12},
+		}
+		data, _ := json.Marshal(finalDelta)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	}))
@@ -153,7 +166,7 @@ func TestChatCompletionStream(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	var collected strings.Builder
-	_, err := c.ChatCompletionStream(context.Background(), ChatCompletionRequest{
+	usage, err := c.ChatCompletionStream(context.Background(), ChatCompletionRequest{
 		Messages: []Message{{Role: "user", Content: "Hi"}},
 	}, func(delta StreamDelta) {
 		if len(delta.Choices) > 0 && delta.Choices[0].Delta != nil {
@@ -165,6 +178,15 @@ func TestChatCompletionStream(t *testing.T) {
 	}
 	if collected.String() != "Hello world!" {
 		t.Errorf("expected 'Hello world!', got %q", collected.String())
+	}
+	if usage.PromptTokens != 8 {
+		t.Errorf("expected 8 prompt tokens, got %d", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 4 {
+		t.Errorf("expected 4 completion tokens, got %d", usage.CompletionTokens)
+	}
+	if usage.TotalTokens != 12 {
+		t.Errorf("expected 12 total tokens, got %d", usage.TotalTokens)
 	}
 }
 

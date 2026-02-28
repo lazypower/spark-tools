@@ -68,10 +68,13 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		return nil, fmt.Errorf("starting llama.cpp: %w", err)
 	}
 
-	// Write PID file.
+	// Write PID file — required for double-launch prevention and cleanup.
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		// Non-fatal: log but continue.
-		_ = err
+		// Can't track this process. Kill it and report the error.
+		cmd.Process.Kill()
+		cancel()
+		stderrFile.Close()
+		return nil, fmt.Errorf("writing PID file: %w", err)
 	}
 
 	// Determine endpoint for server mode.

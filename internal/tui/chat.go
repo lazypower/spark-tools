@@ -29,6 +29,7 @@ type ChatConfig struct {
 type chatModel struct {
 	cfg    ChatConfig
 	client *api.Client
+	prog   *tea.Program // set after NewProgram, used to send streaming tokens
 
 	// Conversation
 	messages []api.Message
@@ -41,11 +42,11 @@ type chatModel struct {
 	err          error
 	quitting     bool
 
-	// Stats
-	promptTokens int
-	genTokens    int
-	startTime    time.Time
-	lastSpeed    float64
+	// Stats — updated from server-reported Usage after each response.
+	promptTokens int // cumulative prompt tokens (latest server report)
+	genTokens    int // cumulative completion tokens (latest server report)
+	lastGenStart time.Time
+	lastGenDur   time.Duration
 
 	// Terminal
 	width  int
@@ -55,7 +56,12 @@ type chatModel struct {
 // tokenMsg delivers a streamed token to the TUI.
 type tokenMsg struct {
 	content string
-	done    bool
+}
+
+// streamDoneMsg signals the stream completed with usage and finish reason.
+type streamDoneMsg struct {
+	usage        api.Usage
+	finishReason string
 }
 
 // streamErrMsg delivers a streaming error.
@@ -64,12 +70,12 @@ type streamErrMsg struct{ err error }
 // RunChat launches the interactive chat TUI.
 func RunChat(cfg ChatConfig) error {
 	m := &chatModel{
-		cfg:       cfg,
-		client:    cfg.Client,
-		startTime: time.Now(),
+		cfg:    cfg,
+		client: cfg.Client,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	m.prog = p
 	_, err := p.Run()
 	return err
 }
@@ -113,26 +119,49 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tokenMsg:
-		if msg.done {
-			m.streaming = false
-			content := m.streamBuf.String()
-			if content != "" {
-				m.messages = append(m.messages, api.Message{
-					Role:    "assistant",
-					Content: content,
-				})
-			}
-			m.streamBuf.Reset()
-			return m, nil
-		}
 		m.streamBuf.WriteString(msg.content)
-		m.genTokens++
+		return m, nil
+
+	case streamDoneMsg:
+		m.streaming = false
+		m.lastGenDur = time.Since(m.lastGenStart)
+
+		content := m.streamBuf.String()
+		if content != "" {
+			m.messages = append(m.messages, api.Message{
+				Role:    "assistant",
+				Content: content,
+			})
+		}
+		m.streamBuf.Reset()
+
+		// Update token counts from server-reported usage.
+		if msg.usage.TotalTokens > 0 {
+			m.promptTokens = msg.usage.PromptTokens
+			m.genTokens = msg.usage.CompletionTokens
+		}
+
+		// Warn if generation was truncated by token limit.
+		if msg.finishReason == "length" {
+			m.err = fmt.Errorf("response truncated (hit token limit)")
+		}
 		return m, nil
 
 	case streamErrMsg:
 		m.streaming = false
 		m.err = msg.err
 		m.streamBuf.Reset()
+		return m, nil
+
+	case saveResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.messages = append(m.messages, api.Message{
+				Role:    "system",
+				Content: fmt.Sprintf("Conversation saved to %s", msg.path),
+			})
+		}
 		return m, nil
 	}
 
@@ -225,6 +254,7 @@ func (m *chatModel) handleSubmit() (tea.Model, tea.Cmd) {
 	// Start streaming response.
 	m.streaming = true
 	m.streamBuf.Reset()
+	m.lastGenStart = time.Now()
 
 	return m, m.streamResponse()
 }
@@ -252,8 +282,10 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/stats":
-		elapsed := time.Since(m.startTime).Seconds()
-		speed := float64(m.genTokens) / max(elapsed, 0.001)
+		speed := 0.0
+		if m.lastGenDur > 0 && m.genTokens > 0 {
+			speed = float64(m.genTokens) / m.lastGenDur.Seconds()
+		}
 		ctxUsed := m.promptTokens + m.genTokens
 		stats := RenderSessionStats(m.promptTokens, m.genTokens, ctxUsed, m.cfg.ContextSize, speed)
 		m.messages = append(m.messages, api.Message{
@@ -323,19 +355,35 @@ func (m *chatModel) streamResponse() tea.Cmd {
 			Messages: m.messages,
 		}
 
-		_, err := m.client.ChatCompletionStream(context.Background(), req, func(delta api.StreamDelta) {
-			if len(delta.Choices) > 0 && delta.Choices[0].Delta != nil {
-				// We can't send tea.Msg from here directly in a real bubbletea app,
-				// but for the streaming model we accumulate in streamBuf via the cmd pattern.
-				// In practice, this would use p.Send() or a channel.
+		var finishReason string
+		usage, err := m.client.ChatCompletionStream(context.Background(), req, func(delta api.StreamDelta) {
+			if len(delta.Choices) > 0 {
+				choice := delta.Choices[0]
+				if choice.Delta != nil && choice.Delta.Content != "" {
+					m.prog.Send(tokenMsg{content: choice.Delta.Content})
+				}
+				if choice.FinishReason != "" {
+					finishReason = choice.FinishReason
+				}
 			}
 		})
 
 		if err != nil {
 			return streamErrMsg{err: err}
 		}
-		return tokenMsg{done: true}
+
+		done := streamDoneMsg{finishReason: finishReason}
+		if usage != nil {
+			done.usage = *usage
+		}
+		return done
 	}
+}
+
+// saveResultMsg delivers the result of a save operation.
+type saveResultMsg struct {
+	path string
+	err  error
 }
 
 func (m *chatModel) saveConversation(filename string) tea.Cmd {
@@ -345,8 +393,8 @@ func (m *chatModel) saveConversation(filename string) tea.Cmd {
 			b.WriteString(fmt.Sprintf("[%s]\n%s\n\n", msg.Role, msg.Content))
 		}
 		if err := os.WriteFile(filename, []byte(b.String()), 0644); err != nil {
-			return streamErrMsg{err: fmt.Errorf("saving conversation: %w", err)}
+			return saveResultMsg{err: fmt.Errorf("saving conversation: %w", err)}
 		}
-		return tokenMsg{content: fmt.Sprintf("Conversation saved to %s", filename), done: true}
+		return saveResultMsg{path: filename}
 	}
 }
