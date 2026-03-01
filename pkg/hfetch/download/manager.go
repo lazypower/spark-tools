@@ -88,6 +88,13 @@ func Download(ctx context.Context, src FileSource, filename string, opts Options
 	}
 
 	finalPath := filepath.Join(opts.OutputDir, filename)
+	// Ensure parent directory exists for files in subdirectories
+	// (e.g. "Q4_K_M/model-00001-of-00002.gguf").
+	if dir := filepath.Dir(finalPath); dir != opts.OutputDir {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return "", fmt.Errorf("creating output subdir: %w", err)
+		}
+	}
 	partialPath := finalPath + ".partial"
 	statePath := finalPath + ".state"
 
