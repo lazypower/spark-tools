@@ -184,9 +184,11 @@ func (c *Client) GetModel(ctx context.Context, modelID string) (*Model, error) {
 	return &model, nil
 }
 
-// ListFiles lists files in a model repository.
+// ListFiles lists files in a model repository. It uses recursive mode
+// to include files inside subdirectories (e.g. bartowski's per-quant
+// folders for large split models).
 func (c *Client) ListFiles(ctx context.Context, modelID string) ([]ModelFile, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, c.apiBase+"/models/"+modelID+"/tree/main", nil)
+	req, err := c.newRequest(ctx, http.MethodGet, c.apiBase+"/models/"+modelID+"/tree/main?recursive=true", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +199,17 @@ func (c *Client) ListFiles(ctx context.Context, modelID string) ([]ModelFile, er
 	}
 	defer resp.Body.Close()
 
-	var files []ModelFile
-	if err := json.NewDecoder(resp.Body).Decode(&files); err != nil {
+	var raw []ModelFile
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("decoding file list response: %w", err)
+	}
+
+	// Filter out directory entries — callers only care about files.
+	files := make([]ModelFile, 0, len(raw))
+	for _, f := range raw {
+		if f.Type != "directory" {
+			files = append(files, f)
+		}
 	}
 	return files, nil
 }

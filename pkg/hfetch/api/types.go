@@ -22,6 +22,7 @@ type Sibling struct {
 
 // ModelFile represents a single file in a model repo with full metadata.
 type ModelFile struct {
+	Type     string `json:"type"` // "file" or "directory"
 	Filename string `json:"path"`
 	Size     int64  `json:"size"`
 	BlobID   string `json:"oid"` // Git LFS OID (SHA256)

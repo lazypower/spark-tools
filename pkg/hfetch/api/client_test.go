@@ -131,10 +131,14 @@ func TestListFiles(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Query().Get("recursive") != "true" {
+			t.Error("expected recursive=true query param")
+		}
 		json.NewEncoder(w).Encode([]ModelFile{
-			{Filename: "llama-2-7b.Q4_K_M.gguf", Size: 4_000_000_000},
-			{Filename: "llama-2-7b.Q8_0.gguf", Size: 7_000_000_000},
-			{Filename: "README.md", Size: 1234},
+			{Type: "file", Filename: "llama-2-7b.Q4_K_M.gguf", Size: 4_000_000_000},
+			{Type: "file", Filename: "llama-2-7b.Q8_0.gguf", Size: 7_000_000_000},
+			{Type: "file", Filename: "README.md", Size: 1234},
+			{Type: "directory", Filename: "some-subdir"},
 		})
 	})
 	defer srv.Close()
@@ -143,8 +147,9 @@ func TestListFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
+	// Directory entry should be filtered out
 	if len(files) != 3 {
-		t.Errorf("expected 3 files, got %d", len(files))
+		t.Errorf("expected 3 files (directories filtered), got %d", len(files))
 	}
 }
 
