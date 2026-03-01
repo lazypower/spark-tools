@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -97,21 +98,24 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		fileSizeMap[f.Filename] = size
 	}
 
-	// Determine which file to download.
-	var selectedFile string
+	// Determine which files to download.
+	// selectedFiles holds the remote paths (may include subdir prefix).
+	var selectedFiles []string
 
 	switch {
 	case flags.filename != "":
-		selectedFile = flags.filename
+		selectedFiles = []string{flags.filename}
 	case flags.quant != "":
 		ggufFiles := gguf.FilterGGUF(infos)
 		matched := gguf.FilterByQuant(ggufFiles, flags.quant)
 		if len(matched) == 0 {
 			return fmt.Errorf("no file found for quantization %q", flags.quant)
 		}
-		selectedFile = matched[0].Filename
+		for _, f := range matched {
+			selectedFiles = append(selectedFiles, f.Filename)
+		}
 	default:
-		// Interactive picker.
+		// Interactive picker — group by quant so split shards appear as one option.
 		candidates := infos
 		if !flags.allFiles {
 			ggufFiles := gguf.FilterGGUF(infos)
@@ -123,43 +127,58 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		if len(candidates) == 0 {
 			return fmt.Errorf("no GGUF files found in %s (use --all-files to show all)", modelID)
 		}
-		gguf.SortByQuality(candidates)
+
+		groups := gguf.GroupByQuant(candidates)
 
 		var options []huh.Option[string]
-		for _, f := range candidates {
-			fit := gguf.EstimateFit(f.Size, nil, 0)
+		for _, g := range groups {
+			fit := gguf.EstimateFit(g.TotalSize, nil, 0)
 			fitLabel := ""
 			if fit.Status != gguf.FitUnknown {
 				fitLabel = "  " + fit.Label
 			}
 			qualLabel := ""
-			if ql := gguf.QuantQualityLabel(f.Quantization); ql != "" {
+			if ql := gguf.QuantQualityLabel(g.Quantization); ql != "" {
 				qualLabel = "  " + ql
 			}
-			label := fmt.Sprintf("%-10s %s%s%s", f.Quantization, formatSize(f.Size), fitLabel, qualLabel)
-			if f.Quantization == "" {
-				label = fmt.Sprintf("%-10s %s", f.Filename, formatSize(f.Size))
+			shardInfo := ""
+			if g.ShardCount > 1 {
+				shardInfo = fmt.Sprintf("  (%d files)", g.ShardCount)
 			}
-			options = append(options, huh.NewOption(label, f.Filename))
+			label := fmt.Sprintf("%-12s %s%s%s%s", g.Quantization, formatSize(g.TotalSize), shardInfo, fitLabel, qualLabel)
+			if g.Quantization == "" {
+				label = fmt.Sprintf("%-12s %s%s", filepath.Base(g.Files[0].Filename), formatSize(g.TotalSize), shardInfo)
+			}
+			// Value is the quant name; we'll resolve to files after selection.
+			options = append(options, huh.NewOption(label, g.Quantization))
 		}
 
-		var selected string
+		var selectedQuant string
 		form := huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
 					Title(modelID).
-					Description("Select a file to download").
+					Description("Select a quantization to download").
 					Options(options...).
-					Value(&selected),
+					Value(&selectedQuant),
 			),
 		)
 		if err := form.Run(); err != nil {
 			return err
 		}
-		selectedFile = selected
+
+		// Resolve selected quant to all its files.
+		for _, g := range groups {
+			if g.Quantization == selectedQuant {
+				for _, f := range g.Files {
+					selectedFiles = append(selectedFiles, f.Filename)
+				}
+				break
+			}
+		}
 	}
 
-	if selectedFile == "" {
+	if len(selectedFiles) == 0 {
 		return fmt.Errorf("no file selected")
 	}
 
@@ -176,66 +195,6 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 
 	streams := resolveStreams(flags.streams)
 
-	if !flags.jsonOutput {
-		headerStyle := lipgloss.NewStyle().Bold(true)
-		fmt.Printf("\n  %s\n", headerStyle.Render("Downloading"))
-		fmt.Printf("  Model:   %s\n", modelID)
-		fmt.Printf("  File:    %s\n", selectedFile)
-		if size, ok := fileSizeMap[selectedFile]; ok {
-			fmt.Printf("  Size:    %s\n", formatSize(size))
-		}
-		fmt.Printf("  Streams: %d\n", streams)
-		fmt.Println()
-	}
-
-	// Create an API-backed file source.
-	src := &apiFileSource{
-		client:  client,
-		modelID: modelID,
-		file:    selectedFile,
-	}
-
-	startTime := time.Now()
-
-	var progressFn download.ProgressFunc
-	if flags.jsonOutput {
-		progressFn = func(e download.ProgressEvent) {
-			evt := map[string]any{
-				"file":            e.File,
-				"bytes_completed": e.BytesCompleted,
-				"bytes_total":     e.BytesTotal,
-				"speed_bps":       e.Speed,
-				"phase":           e.Phase,
-			}
-			data, _ := json.Marshal(evt)
-			fmt.Println(string(data))
-		}
-	} else {
-		progressFn = func(e download.ProgressEvent) {
-			switch e.Phase {
-			case "downloading":
-				pct := float64(e.BytesCompleted) / float64(e.BytesTotal) * 100
-				speed := ""
-				if e.Speed > 0 {
-					speed = fmt.Sprintf(" %s/s", formatSize(int64(e.Speed)))
-				}
-				elapsed := time.Since(startTime)
-				eta := ""
-				if e.Speed > 0 && e.BytesCompleted < e.BytesTotal {
-					remaining := float64(e.BytesTotal-e.BytesCompleted) / e.Speed
-					eta = fmt.Sprintf(" ETA %s", time.Duration(remaining*float64(time.Second)).Truncate(time.Second))
-				}
-				_ = elapsed
-				fmt.Printf("\r  Downloading... %.1f%% (%s / %s)%s%s    ",
-					pct, formatSize(e.BytesCompleted), formatSize(e.BytesTotal), speed, eta)
-			case "verifying":
-				fmt.Printf("\r  Verifying SHA256...                                              ")
-			case "complete":
-				fmt.Printf("\r  Complete! %s                                                     \n", formatSize(e.BytesTotal))
-			}
-		}
-	}
-
 	var maxBW int64
 	if flags.maxBandwidth != "" {
 		maxBW, err = parseBandwidth(flags.maxBandwidth)
@@ -244,45 +203,116 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		}
 	}
 
-	finalPath, err := download.Download(context.Background(), src, selectedFile, download.Options{
-		OutputDir:    outputDir,
-		Streams:      streams,
-		MaxBandwidth: maxBW,
-		OnProgress:   progressFn,
-	})
-	if err != nil {
+	// Download each file (all shards for the selected quant).
+	for i, remoteFile := range selectedFiles {
+		// Local filename strips any subdirectory prefix — store flat.
+		localFile := filepath.Base(remoteFile)
+
 		if !flags.jsonOutput {
-			// Ensure error is visible after \r progress output.
+			headerStyle := lipgloss.NewStyle().Bold(true)
+			if i == 0 {
+				fmt.Printf("\n  %s\n", headerStyle.Render("Downloading"))
+				fmt.Printf("  Model:   %s\n", modelID)
+			}
+			if len(selectedFiles) > 1 {
+				fmt.Printf("  File:    %s (%d/%d)\n", localFile, i+1, len(selectedFiles))
+			} else {
+				fmt.Printf("  File:    %s\n", localFile)
+			}
+			if size, ok := fileSizeMap[remoteFile]; ok {
+				fmt.Printf("  Size:    %s\n", formatSize(size))
+			}
+			fmt.Printf("  Streams: %d\n", streams)
 			fmt.Println()
 		}
-		return err
-	}
 
-	// Register the downloaded file.
-	quant := gguf.ParseQuantFromFilename(selectedFile)
-	reg.AddFile(modelID, registry.LocalFile{
-		Filename:     selectedFile,
-		Size:         fileSizeMap[selectedFile],
-		Quantization: quant,
-		LocalPath:    finalPath,
-		Complete:     true,
-		DownloadedAt: time.Now(),
-	})
-	if err := reg.Save(); err != nil {
-		return fmt.Errorf("saving manifest: %w", err)
-	}
-
-	if flags.jsonOutput {
-		evt := map[string]any{
-			"phase": "saved",
-			"path":  finalPath,
-			"model": modelID,
-			"file":  selectedFile,
+		src := &apiFileSource{
+			client:  client,
+			modelID: modelID,
+			file:    remoteFile, // full path for HF API URL
 		}
-		data, _ := json.Marshal(evt)
-		fmt.Println(string(data))
-	} else {
-		fmt.Printf("  Saved to: %s\n\n", finalPath)
+
+		startTime := time.Now()
+
+		var progressFn download.ProgressFunc
+		if flags.jsonOutput {
+			progressFn = func(e download.ProgressEvent) {
+				evt := map[string]any{
+					"file":            e.File,
+					"bytes_completed": e.BytesCompleted,
+					"bytes_total":     e.BytesTotal,
+					"speed_bps":       e.Speed,
+					"phase":           e.Phase,
+				}
+				data, _ := json.Marshal(evt)
+				fmt.Println(string(data))
+			}
+		} else {
+			progressFn = func(e download.ProgressEvent) {
+				switch e.Phase {
+				case "downloading":
+					pct := float64(e.BytesCompleted) / float64(e.BytesTotal) * 100
+					speed := ""
+					if e.Speed > 0 {
+						speed = fmt.Sprintf(" %s/s", formatSize(int64(e.Speed)))
+					}
+					elapsed := time.Since(startTime)
+					eta := ""
+					if e.Speed > 0 && e.BytesCompleted < e.BytesTotal {
+						remaining := float64(e.BytesTotal-e.BytesCompleted) / e.Speed
+						eta = fmt.Sprintf(" ETA %s", time.Duration(remaining*float64(time.Second)).Truncate(time.Second))
+					}
+					_ = elapsed
+					fmt.Printf("\r  Downloading... %.1f%% (%s / %s)%s%s    ",
+						pct, formatSize(e.BytesCompleted), formatSize(e.BytesTotal), speed, eta)
+				case "verifying":
+					fmt.Printf("\r  Verifying SHA256...                                              ")
+				case "complete":
+					fmt.Printf("\r  Complete! %s                                                     \n", formatSize(e.BytesTotal))
+				}
+			}
+		}
+
+		// Download using local filename (flat, no subdir).
+		finalPath, err := download.Download(context.Background(), src, localFile, download.Options{
+			OutputDir:    outputDir,
+			Streams:      streams,
+			MaxBandwidth: maxBW,
+			OnProgress:   progressFn,
+		})
+		if err != nil {
+			if !flags.jsonOutput {
+				fmt.Println()
+			}
+			return err
+		}
+
+		// Register the downloaded file.
+		quant := gguf.ParseQuantFromFilename(localFile)
+		reg.AddFile(modelID, registry.LocalFile{
+			Filename:     localFile,
+			Size:         fileSizeMap[remoteFile],
+			Quantization: quant,
+			LocalPath:    finalPath,
+			Complete:     true,
+			DownloadedAt: time.Now(),
+		})
+		if err := reg.Save(); err != nil {
+			return fmt.Errorf("saving manifest: %w", err)
+		}
+
+		if flags.jsonOutput {
+			evt := map[string]any{
+				"phase": "saved",
+				"path":  finalPath,
+				"model": modelID,
+				"file":  localFile,
+			}
+			data, _ := json.Marshal(evt)
+			fmt.Println(string(data))
+		} else if i == len(selectedFiles)-1 {
+			fmt.Printf("  Saved to: %s\n\n", outputDir)
+		}
 	}
 	return nil
 }

@@ -46,40 +46,50 @@ func filesCmd() *cobra.Command {
 				})
 			}
 
-			// Apply filters.
-			if quantFilter != "" {
-				infos = gguf.FilterByQuant(infos, quantFilter)
-			} else {
-				// Default: show only GGUF files if any exist.
-				ggufFiles := gguf.FilterGGUF(infos)
-				if len(ggufFiles) > 0 {
-					infos = ggufFiles
-				}
+			// Default: show only GGUF files if any exist.
+			ggufFiles := gguf.FilterGGUF(infos)
+			if len(ggufFiles) > 0 {
+				infos = ggufFiles
 			}
 
-			gguf.SortByQuality(infos)
+			// Apply quant filter.
+			if quantFilter != "" {
+				infos = gguf.FilterByQuant(infos, quantFilter)
+			}
 
-			fmt.Printf("  %-45s %-10s %-10s %-12s %s\n", "File", "Quant", "Size", "Bits/Weight", "Fit")
+			// Group by quant to collapse split shards.
+			groups := gguf.GroupByQuant(infos)
+
+			fmt.Printf("  %-12s %-10s %-10s %-12s %-8s %s\n", "Quant", "Size", "Shards", "Bits/Weight", "Fit", "")
 			fmt.Printf("  %s\n", lipgloss.NewStyle().Faint(true).Render(
-				"────────────────────────────────────────────────────────────────────────────────────────",
+				"────────────────────────────────────────────────────────────────────────────",
 			))
 
-			for _, f := range infos {
+			for _, g := range groups {
 				bpw := ""
-				if f.BitsPerWeight > 0 {
-					bpw = fmt.Sprintf("%.2f", f.BitsPerWeight)
+				if g.BitsPerWeight > 0 {
+					bpw = fmt.Sprintf("%.2f", g.BitsPerWeight)
 				}
-				quant := f.Quantization
+				quant := g.Quantization
 				if quant == "" {
 					quant = "—"
 				}
 
-				// Fit estimation (best-effort with available metadata).
-				fit := gguf.EstimateFit(f.Size, nil, 0)
+				shards := ""
+				if g.ShardCount > 1 {
+					shards = fmt.Sprintf("%d files", g.ShardCount)
+				}
+
+				fit := gguf.EstimateFit(g.TotalSize, nil, 0)
 				fitLabel := fit.FitLabel()
 
-				fmt.Printf("  %-45s %-10s %-10s %-12s %s\n",
-					f.Filename, quant, formatSize(f.Size), bpw, fitLabel)
+				qualLabel := ""
+				if ql := gguf.QuantQualityLabel(g.Quantization); ql != "" {
+					qualLabel = ql
+				}
+
+				fmt.Printf("  %-12s %-10s %-10s %-12s %-8s %s\n",
+					quant, formatSize(g.TotalSize), shards, bpw, fitLabel, qualLabel)
 			}
 			fmt.Println()
 

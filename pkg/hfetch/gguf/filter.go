@@ -70,6 +70,58 @@ func FilterByQuant(files []FileInfo, quant string) []FileInfo {
 	return result
 }
 
+// QuantGroup groups split GGUF shards by quantization level.
+type QuantGroup struct {
+	Quantization  string
+	BitsPerWeight float64
+	Files         []FileInfo // individual shards, sorted by filename
+	TotalSize     int64
+	ShardCount    int
+}
+
+// GroupByQuant groups GGUF files by quantization type. Split shards
+// (e.g. model-Q4_K_M-00001-of-00002.gguf) are collapsed into a single
+// group. Files with no recognized quantization are placed in a group
+// with Quantization="".
+func GroupByQuant(files []FileInfo) []QuantGroup {
+	order := make([]string, 0)
+	groups := make(map[string]*QuantGroup)
+
+	for _, f := range files {
+		q := f.Quantization
+		g, ok := groups[q]
+		if !ok {
+			g = &QuantGroup{
+				Quantization:  q,
+				BitsPerWeight: f.BitsPerWeight,
+			}
+			groups[q] = g
+			order = append(order, q)
+		}
+		g.Files = append(g.Files, f)
+		g.TotalSize += f.Size
+		g.ShardCount++
+	}
+
+	// Sort each group's files by name so shard 00001 comes first.
+	for _, g := range groups {
+		sort.Slice(g.Files, func(i, j int) bool {
+			return g.Files[i].Filename < g.Files[j].Filename
+		})
+	}
+
+	// Build result sorted by bits-per-weight descending.
+	result := make([]QuantGroup, 0, len(groups))
+	for _, q := range order {
+		result = append(result, *groups[q])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].BitsPerWeight > result[j].BitsPerWeight
+	})
+
+	return result
+}
+
 // SortBySize sorts files by size ascending.
 func SortBySize(files []FileInfo) {
 	sort.Slice(files, func(i, j int) bool {

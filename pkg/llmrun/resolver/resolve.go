@@ -239,21 +239,28 @@ func parseRegistryRef(ref string) (modelID, quant string) {
 // the local file path. When quant is specified, it matches on the
 // quantization field of the file entry. When quant is empty, the
 // first complete file is returned.
+//
+// For split models (multiple shards with the same quant), the path to
+// the first shard is returned (sorted lexically, so -00001-of-N wins).
+// llama.cpp locates sibling shards automatically.
 func (r *Resolver) findInRegistry(reg *registry.Registry, modelID, quant string) string {
 	model := reg.Get(modelID)
 	if model == nil {
 		return ""
 	}
 
+	var bestPath string
 	for _, f := range model.Files {
 		if !f.Complete {
 			continue
 		}
 		if quant == "" || strings.EqualFold(f.Quantization, quant) {
-			return f.LocalPath
+			if bestPath == "" || f.LocalPath < bestPath {
+				bestPath = f.LocalPath
+			}
 		}
 	}
-	return ""
+	return bestPath
 }
 
 // tryParseGGUF attempts to parse GGUF metadata from a file.
