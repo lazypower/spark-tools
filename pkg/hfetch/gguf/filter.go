@@ -23,8 +23,8 @@ func ParseQuantFromFilename(filename string) string {
 	// Walk from the end looking for a known quant pattern.
 	parts := strings.Split(base, "-")
 	for i := len(parts) - 1; i >= 0; i-- {
-		// Try single part: "Q4_K_M", "Q8_0", "IQ4_XS"
-		candidate := parts[i]
+		// Try single part: "Q4_K_M", "Q8_0", "IQ4_XS", "mxfp4"
+		candidate := strings.ToUpper(parts[i])
 		if _, ok := QuantBitsPerWeight[candidate]; ok {
 			return candidate
 		}
@@ -32,7 +32,7 @@ func ParseQuantFromFilename(filename string) string {
 		// Try joining with next part for multi-segment quants like "Q4_K" + "M"
 		// which shouldn't happen in practice, but handle edge cases.
 		if i+1 < len(parts) {
-			candidate = parts[i] + "_" + parts[i+1]
+			candidate = strings.ToUpper(parts[i] + "_" + parts[i+1])
 			if _, ok := QuantBitsPerWeight[candidate]; ok {
 				return candidate
 			}

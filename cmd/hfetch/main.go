@@ -47,6 +47,7 @@ func rootCmd() *cobra.Command {
 		logoutCmd(),
 		whoamiCmd(),
 		configCmd(),
+		ollamaImportCmd(),
 	)
 
 	return root

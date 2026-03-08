@@ -2,7 +2,7 @@ package gguf
 
 // GGUF magic number and supported versions.
 const (
-	Magic   = 0x46475547 // "GGUF" in little-endian
+	Magic   = 0x46554747 // "GGUF" as little-endian uint32
 	Version2 = 2
 	Version3 = 3
 )
@@ -72,6 +72,41 @@ var FileTypeNames = map[int]string{
 	29: "Q4_0_4_4",
 	30: "Q4_0_4_8",
 	31: "Q4_0_8_8",
+}
+
+// KV represents a GGUF metadata key-value pair with type information
+// preserved for lossless round-trip serialization.
+type KV struct {
+	Key       string
+	ValueType uint32
+	Value     any
+}
+
+// TensorInfo describes a tensor's shape and location within a GGUF file.
+type TensorInfo struct {
+	Name       string
+	NDims      uint32
+	Dimensions []uint64
+	Type       uint32
+	Offset     uint64
+}
+
+// TypedArray preserves the GGUF element type alongside array values,
+// enabling lossless serialization.
+type TypedArray struct {
+	ElemType uint32
+	Values   []any
+}
+
+// ShardHeader contains the fully parsed header of a GGUF shard file,
+// including tensor info entries that Parse() skips.
+type ShardHeader struct {
+	Version     uint32
+	TensorCount uint64
+	KVs         []KV
+	Tensors     []TensorInfo
+	DataOffset  uint64 // byte offset where tensor data section begins
+	Alignment   uint64
 }
 
 // QuantQualityLabel returns a short human-readable quality annotation
@@ -150,4 +185,5 @@ var QuantBitsPerWeight = map[string]float64{
 	"Q5_K_L":  5.75,
 	"Q6_K_L":  6.60,
 	"MXFP4_MOE": 4.50,
+	"MXFP4":     4.50,
 }
