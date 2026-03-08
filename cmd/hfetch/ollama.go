@@ -336,19 +336,25 @@ func extractGGUFModelfileMeta(path string) ggufModelfileMeta {
 		}
 	}
 
-	meta.StopTokens = inferStopTokens(meta.ChatTemplate, meta.EOS, meta.EOT, tokens)
-
-	// Add extra stops from the detected template family.
+	// When a template family is detected, use its curated stop list
+	// (EOS/EOT + family extras) instead of generic inference. Some tokens
+	// like <|end|> are stop-like by name but serve as internal delimiters
+	// in certain families (e.g., GPT-OSS channel blocks).
 	if fam := detectTemplateFamily(meta.ChatTemplate, meta.EOS); fam != nil {
 		seen := make(map[string]bool)
-		for _, s := range meta.StopTokens {
-			seen[s] = true
-		}
-		for _, s := range fam.extraStops {
-			if !seen[s] {
-				meta.StopTokens = append(meta.StopTokens, s)
+		add := func(tok string) {
+			if tok != "" && !seen[tok] {
+				meta.StopTokens = append(meta.StopTokens, tok)
+				seen[tok] = true
 			}
 		}
+		add(meta.EOS)
+		add(meta.EOT)
+		for _, s := range fam.extraStops {
+			add(s)
+		}
+	} else {
+		meta.StopTokens = inferStopTokens(meta.ChatTemplate, meta.EOS, meta.EOT, tokens)
 	}
 
 	return meta
@@ -490,16 +496,19 @@ var knownTemplateFamilies = []templateFamily{
 	},
 	{
 		// GPT-OSS — uses <|start|>role<|message|>content<|end|> format.
-		// Template ends with <|start|>assistant (not <|channel|>final<|message|>)
-		// so the model emits its own channel routing tokens. Ollama's harmony
-		// parser splits <|channel|>analysis into thinking and <|channel|>final
-		// into content.
-		markers:    []string{"<|start|>", "<|end|>", "<|message|>"},
-		eosHint:    "<|return|>",
+		// Uses .Messages range for multi-turn chat API support. Ends with
+		// <|start|>assistant so the model emits its own channel routing
+		// (analysis→final). Ollama's harmony parser routes analysis to
+		// thinking and final to content. <|end|> must NOT be a stop token —
+		// it closes internal channel blocks.
+		markers: []string{"<|start|>", "<|end|>", "<|message|>"},
+		eosHint: "<|return|>",
 		goTemplate: `{{- if .System }}<|start|>system<|message|>{{ .System }}<|end|>{{ end }}
-{{- if .Prompt }}<|start|>user<|message|>{{ .Prompt }}<|end|>{{ end }}
-<|start|>assistant{{ .Response }}`,
-		extraStops: []string{"<|end|>", "<|endoftext|>"},
+{{- range .Messages }}
+{{- if eq .Role "user" }}<|start|>user<|message|>{{ .Content }}<|end|>{{ end }}
+{{- if eq .Role "assistant" }}<|start|>assistant<|channel|>final<|message|>{{ .Content }}<|end|>{{ end }}
+{{- end }}<|start|>assistant`,
+		extraStops: []string{"<|endoftext|>"},
 	},
 	{
 		// Gemma / Gemma 2
