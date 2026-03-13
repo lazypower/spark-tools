@@ -109,6 +109,11 @@ func BuildCommand(cfg RunConfig, caps Capabilities) (cmd []string, warnings []st
 		cmd = append(cmd, "--chat-template", cfg.ChatTemplate)
 	}
 
+	// --- Reasoning budget ---
+	if cfg.ReasoningBudget >= 0 {
+		cmd = append(cmd, "--reasoning-budget", strconv.Itoa(cfg.ReasoningBudget))
+	}
+
 	// --- System prompt ---
 	if cfg.SystemPrompt != "" {
 		cmd = append(cmd, "--system-prompt", cfg.SystemPrompt)

@@ -42,6 +42,9 @@ type RunConfig struct {
 	// Chat template
 	ChatTemplate string `json:"chatTemplate,omitempty"` // Override GGUF chat template (e.g. "chatml")
 
+	// Reasoning
+	ReasoningBudget int `json:"reasoningBudget,omitempty"` // --reasoning-budget; 0 disables thinking, -1 = default (omit)
+
 	// Advanced
 	FlashAttention bool         `json:"flashAttention,omitempty"`
 	MMap           bool         `json:"mmap,omitempty"`

@@ -26,6 +26,9 @@ func chatCmd() *cobra.Command {
 		temp        float64
 		systemText  string
 		systemFile  string
+		port        int
+		timeout     int
+		noThink     bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,6 +46,9 @@ func chatCmd() *cobra.Command {
 				temp:        temp,
 				systemText:  systemText,
 				systemFile:  systemFile,
+				port:        port,
+				timeout:     timeout,
+				noThink:     noThink,
 				interactive: true,
 			})
 		},
@@ -53,6 +59,9 @@ func chatCmd() *cobra.Command {
 	cmd.Flags().Float64Var(&temp, "temp", 0, "Temperature (default: 0.7)")
 	cmd.Flags().StringVar(&systemText, "system", "", "System prompt")
 	cmd.Flags().StringVar(&systemFile, "system-file", "", "System prompt from file")
+	cmd.Flags().IntVar(&port, "port", 0, "Server port (default: 8080)")
+	cmd.Flags().IntVar(&timeout, "timeout", 0, "Server startup timeout in seconds (default: 60)")
+	cmd.Flags().BoolVar(&noThink, "no-think", false, "Disable model thinking (--reasoning-budget 0)")
 
 	return cmd
 }
@@ -90,8 +99,10 @@ type inferenceFlags struct {
 	systemText  string
 	systemFile  string
 	interactive bool
+	noThink     bool
 	host        string
 	port        int
+	timeout     int
 	parallel    int
 	apiKey      string
 	prompt      string
@@ -121,6 +132,10 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		} else {
 			cfg = p.Config
 		}
+	}
+	// Default reasoning budget to -1 (omit flag) unless profile set it.
+	if cfg.ReasoningBudget == 0 {
+		cfg.ReasoningBudget = -1
 	}
 
 	// Model ref overrides profile's model.
@@ -174,12 +189,20 @@ func runInference(modelRef string, flags inferenceFlags) error {
 	if flags.apiKey != "" {
 		cfg.APIKey = flags.apiKey
 	}
+	if flags.noThink {
+		cfg.ReasoningBudget = 0
+	}
 
 	// Detect llama.cpp.
 	llamaDir := gcfg.LlamaDir
 	caps, err := engine.DetectBinaries(llamaDir)
 	if err != nil {
 		return fmt.Errorf("llama.cpp not found: %w\n\n  Set LLM_RUN_LLAMA_DIR to your llama.cpp build directory,\n  or ensure llama-server is on your PATH.", err)
+	}
+
+	startupTimeout := 60 * time.Second
+	if flags.timeout > 0 {
+		startupTimeout = time.Duration(flags.timeout) * time.Second
 	}
 
 	if flags.interactive {
@@ -209,7 +232,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 			}
 		}()
 
-		if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
+		if err := engine.WaitForReady(readyCtx, endpoint, startupTimeout); err != nil {
 			readyCancel()
 			if proc.Err() != nil {
 				return fmt.Errorf("llama-server crashed during startup: %w\n\n%s", proc.Err(), formatCrashLog(proc))
@@ -255,7 +278,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		}
 	}()
 
-	if err := engine.WaitForReady(readyCtx, endpoint, 60*time.Second); err != nil {
+	if err := engine.WaitForReady(readyCtx, endpoint, startupTimeout); err != nil {
 		readyCancel()
 		if proc.Err() != nil {
 			return fmt.Errorf("llama-server crashed during startup: %w\n\n%s", proc.Err(), formatCrashLog(proc))
