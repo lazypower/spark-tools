@@ -27,6 +27,11 @@ func serveCmd() *cobra.Command {
 		ctxSize     int
 		parallel    int
 		apiKey      string
+		temp        float64
+		systemText  string
+		systemFile  string
+		timeout     int
+		noThink     bool
 	)
 
 	cmd := &cobra.Command{
@@ -50,6 +55,9 @@ func serveCmd() *cobra.Command {
 					return fmt.Errorf("loading profile %q: %w", profileName, err)
 				}
 				cfg = p.Config
+			}
+			if cfg.ReasoningBudget == 0 {
+				cfg.ReasoningBudget = -1
 			}
 
 			cfg.ModelRef = modelRef
@@ -94,6 +102,22 @@ func serveCmd() *cobra.Command {
 			if apiKey != "" {
 				cfg.APIKey = apiKey
 			}
+			if temp > 0 {
+				cfg.Temperature = temp
+			}
+			if systemText != "" {
+				cfg.SystemPrompt = systemText
+			}
+			if systemFile != "" {
+				data, err := os.ReadFile(systemFile)
+				if err != nil {
+					return fmt.Errorf("reading system prompt file: %w", err)
+				}
+				cfg.SystemPrompt = string(data)
+			}
+			if noThink {
+				cfg.ReasoningBudget = 0
+			}
 
 			// Detect llama.cpp.
 			caps, err := engine.DetectBinaries(gcfg.LlamaDir)
@@ -124,7 +148,11 @@ func serveCmd() *cobra.Command {
 				}
 			}()
 
-			if err := engine.WaitForReady(readyCtx, endpoint, 120*time.Second); err != nil {
+			startupTimeout := 120 * time.Second
+			if timeout > 0 {
+				startupTimeout = time.Duration(timeout) * time.Second
+			}
+			if err := engine.WaitForReady(readyCtx, endpoint, startupTimeout); err != nil {
 				readyCancel()
 				proc.Stop()
 				if proc.Err() != nil {
@@ -156,6 +184,11 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().IntVar(&ctxSize, "ctx", 0, "Context size (default: auto)")
 	cmd.Flags().IntVar(&parallel, "parallel", 0, "Parallel request slots (default: 1)")
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "Require API key for requests")
+	cmd.Flags().Float64Var(&temp, "temp", 0, "Temperature (default: 0.7)")
+	cmd.Flags().StringVar(&systemText, "system", "", "System prompt")
+	cmd.Flags().StringVar(&systemFile, "system-file", "", "System prompt from file")
+	cmd.Flags().IntVar(&timeout, "timeout", 0, "Server startup timeout in seconds (default: 120)")
+	cmd.Flags().BoolVar(&noThink, "no-think", false, "Disable model thinking (--reasoning-budget 0)")
 
 	return cmd
 }
