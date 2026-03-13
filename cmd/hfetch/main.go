@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/version"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 )
@@ -20,9 +21,10 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "hfetch",
-		Short: "HuggingFace client in pure Go",
-		Long:  "hfetch — download, manage, and inspect GGUF models from HuggingFace Hub.",
+		Use:     "hfetch",
+		Short:   "HuggingFace client in pure Go",
+		Long:    "hfetch — download, manage, and inspect GGUF models from HuggingFace Hub.",
+		Version: version.Version,
 		// Bare-arg shorthand: hfetch org/model → hfetch pull org/model (interactive)
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 && strings.Contains(args[0], "/") {

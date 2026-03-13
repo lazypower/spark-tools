@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/lazypower/spark-tools/internal/version"
 )
 
 func main() {
@@ -16,9 +18,10 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "llm-bench",
-		Short: "LLM benchmark suite",
-		Long:  "llm-bench — declarative benchmarking for local LLMs on DGX Spark hardware.",
+		Use:     "llm-bench",
+		Short:   "LLM benchmark suite",
+		Long:    "llm-bench — declarative benchmarking for local LLMs on DGX Spark hardware.",
+		Version: version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
