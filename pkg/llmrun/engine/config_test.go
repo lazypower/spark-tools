@@ -503,6 +503,84 @@ func TestBuildCommand_GPULayersPositiveOnCPU(t *testing.T) {
 	assertContainsFlag(t, cmdStr, "--n-gpu-layers", "10")
 }
 
+func TestBuildCommand_ReasoningBudgetZero(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode:      true,
+		ModelPath:       "/models/test.gguf",
+		ReasoningBudget: 0, // Disable thinking.
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	assertContainsFlag(t, cmdStr, "--reasoning-budget", "0")
+}
+
+func TestBuildCommand_ReasoningBudgetPositive(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode:      true,
+		ModelPath:       "/models/test.gguf",
+		ReasoningBudget: 1024,
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	assertContainsFlag(t, cmdStr, "--reasoning-budget", "1024")
+}
+
+func TestBuildCommand_ReasoningBudgetNegativeOmitted(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode:      true,
+		ModelPath:       "/models/test.gguf",
+		ReasoningBudget: -1, // Default: omit flag entirely.
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	if strings.Contains(cmdStr, "--reasoning-budget") {
+		t.Errorf("--reasoning-budget should be omitted when set to -1, got: %s", cmdStr)
+	}
+}
+
+func TestBuildCommand_ChatTemplate(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode:   true,
+		ModelPath:    "/models/test.gguf",
+		ChatTemplate: "chatml",
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	assertContainsFlag(t, cmdStr, "--chat-template", "chatml")
+}
+
 // assertContainsFlag checks that a flag and its value appear in the command string.
 func assertContainsFlag(t *testing.T, cmdStr, flag, value string) {
 	t.Helper()
