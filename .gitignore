@@ -2,6 +2,7 @@
 /hfetch
 /llm-run
 /llm-bench
+/llm-chat
 /hfetch-*
 *.exe
 

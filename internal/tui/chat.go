@@ -24,6 +24,7 @@ type ChatConfig struct {
 	ContextSize int
 	GPUName     string
 	Threads     int
+	MultiLine   bool // Enter inserts newline, Ctrl+Enter submits
 }
 
 // chatModel is the bubbletea model for interactive chat.
@@ -68,11 +69,13 @@ type streamDoneMsg struct {
 // streamErrMsg delivers a streaming error.
 type streamErrMsg struct{ err error }
 
-// RunChat launches the interactive chat TUI.
-func RunChat(cfg ChatConfig) error {
+// RunChat launches the interactive chat TUI. Optional initial messages
+// (e.g. a system prompt) are prepended to the conversation.
+func RunChat(cfg ChatConfig, initial ...api.Message) error {
 	m := &chatModel{
-		cfg:    cfg,
-		client: cfg.Client,
+		cfg:      cfg,
+		client:   cfg.Client,
+		messages: initial,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -107,7 +110,11 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyEnter:
-			return m.handleSubmit()
+			if m.cfg.MultiLine && !msg.Alt {
+				m.input += "\n"
+			} else {
+				return m.handleSubmit()
+			}
 		case tea.KeyBackspace:
 			if len(m.input) > 0 {
 				m.input = m.input[:len(m.input)-1]
@@ -243,6 +250,10 @@ func (m *chatModel) View() string {
 			promptStyle.Render("You:"),
 			m.input))
 		b.WriteString("█\n")
+		if m.cfg.MultiLine {
+			b.WriteString(dimStyle.Render("  Alt+Enter to send"))
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -437,6 +448,7 @@ func checkBoundary(accumulated string) (clean string, hit bool) {
 func (m *chatModel) streamResponse() tea.Cmd {
 	return func() tea.Msg {
 		req := api.ChatCompletionRequest{
+			Model:    m.cfg.ModelName,
 			Messages: m.messages,
 			Stop:     chatStopSequences,
 		}

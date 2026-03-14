@@ -14,7 +14,7 @@ default:
     @just --list
 
 # Build all binaries to ~/.local/bin
-build: build-hfetch build-llm-run build-llm-bench
+build: build-hfetch build-llm-run build-llm-bench build-llm-chat
 
 # Build hfetch
 build-hfetch:
@@ -28,12 +28,17 @@ build-llm-run:
 build-llm-bench:
     {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-bench ./cmd/llm-bench
 
+# Build llm-chat
+build-llm-chat:
+    {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-chat ./cmd/llm-chat
+
 # Cross-compile all binaries for Linux ARM64 (e.g. DGX Spark)
 build-linux-arm64:
     mkdir -p {{dist-arm64}}
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/hfetch ./cmd/hfetch
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-run ./cmd/llm-run
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-bench ./cmd/llm-bench
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-chat ./cmd/llm-chat
     @echo "Built to {{dist-arm64}}/"
 
 # Cross-compile all binaries for Linux AMD64
@@ -42,6 +47,7 @@ build-linux-amd64:
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/hfetch ./cmd/hfetch
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-run ./cmd/llm-run
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-bench ./cmd/llm-bench
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-chat ./cmd/llm-chat
     @echo "Built to {{dist-amd64}}/"
 
 # Run all tests
@@ -65,7 +71,7 @@ check: vet test build
 
 # Clean built binaries
 clean:
-    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-bench
+    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-bench {{bin}}/llm-chat
     rm -rf dist/
 
 # Install (alias for build)
