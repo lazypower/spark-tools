@@ -32,6 +32,7 @@ func serveCmd() *cobra.Command {
 		systemFile  string
 		timeout     int
 		noThink     bool
+		tools       bool
 	)
 
 	cmd := &cobra.Command{
@@ -118,6 +119,9 @@ func serveCmd() *cobra.Command {
 			if noThink {
 				cfg.ReasoningBudget = 0
 			}
+			if tools {
+				cfg.Tools = true
+			}
 
 			// Detect llama.cpp.
 			caps, err := engine.DetectBinaries(gcfg.LlamaDir)
@@ -189,6 +193,7 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&systemFile, "system-file", "", "System prompt from file")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "Server startup timeout in seconds (default: 120)")
 	cmd.Flags().BoolVar(&noThink, "no-think", false, "Disable model thinking (--reasoning-budget 0)")
+	cmd.Flags().BoolVar(&tools, "tools", false, "Enable OpenAI tool-calling support (passes --jinja to llama-server)")
 
 	return cmd
 }

@@ -109,6 +109,11 @@ func BuildCommand(cfg RunConfig, caps Capabilities) (cmd []string, warnings []st
 		cmd = append(cmd, "--chat-template", cfg.ChatTemplate)
 	}
 
+	// --- Tool calling (requires Jinja template support) ---
+	if cfg.Tools {
+		cmd = append(cmd, "--jinja")
+	}
+
 	// --- Reasoning budget ---
 	if cfg.ReasoningBudget >= 0 {
 		cmd = append(cmd, "--reasoning-budget", strconv.Itoa(cfg.ReasoningBudget))

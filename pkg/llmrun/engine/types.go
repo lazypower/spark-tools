@@ -42,6 +42,9 @@ type RunConfig struct {
 	// Chat template
 	ChatTemplate string `json:"chatTemplate,omitempty"` // Override GGUF chat template (e.g. "chatml")
 
+	// Tool calling
+	Tools bool `json:"tools,omitempty"` // Enable Jinja templates for OpenAI tool-calling support
+
 	// Reasoning
 	ReasoningBudget int `json:"reasoningBudget,omitempty"` // --reasoning-budget; 0 disables thinking, -1 = default (omit)
 

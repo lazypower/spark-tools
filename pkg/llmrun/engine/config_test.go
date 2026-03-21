@@ -581,6 +581,47 @@ func TestBuildCommand_ChatTemplate(t *testing.T) {
 	assertContainsFlag(t, cmdStr, "--chat-template", "chatml")
 }
 
+func TestBuildCommand_ToolsEnabled(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode: true,
+		ModelPath:  "/models/test.gguf",
+		Tools:      true,
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	if !strings.Contains(cmdStr, "--jinja") {
+		t.Errorf("expected --jinja when tools enabled, got: %s", cmdStr)
+	}
+}
+
+func TestBuildCommand_ToolsDisabledByDefault(t *testing.T) {
+	binDir := setupFakeBinaries(t)
+	caps := fullCaps(binDir)
+
+	cfg := RunConfig{
+		ServerMode: true,
+		ModelPath:  "/models/test.gguf",
+	}
+
+	cmd, _, err := BuildCommand(cfg, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cmdStr := strings.Join(cmd, " ")
+	if strings.Contains(cmdStr, "--jinja") {
+		t.Errorf("--jinja should not be present when tools not enabled, got: %s", cmdStr)
+	}
+}
+
 // assertContainsFlag checks that a flag and its value appear in the command string.
 func assertContainsFlag(t *testing.T, cmdStr, flag, value string) {
 	t.Helper()
