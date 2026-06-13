@@ -1,11 +1,15 @@
 # Spark Tools
 
-Pure Go toolchain for local LLM workflows on DGX Spark hardware. Three tools, zero cgo, one dependency chain.
+Pure Go toolchain for local LLM workflows on DGX Spark hardware. Four tools, zero cgo, one dependency chain.
 
 ```
 hfetch ──▶ llm-run ──▶ llm-bench
  model       inference     benchmarks
  management  engine        & analysis
+   │
+   └──▶ llm-tidy
+        inventory
+        management
 ```
 
 ## hfetch
@@ -131,6 +135,55 @@ llm-bench init --hardware                  # Generate starter config from your h
 
 Results are stored in `~/.local/share/llm-bench/results/` with full config snapshots for reproducibility.
 
+## llm-tidy
+
+Declarative model inventory management. Define which models should exist on this machine, prune the rest.
+
+```sh
+llm-tidy init                              # Bootstrap manifest from current inventory
+llm-tidy status                            # Show blessed / untracked / missing
+llm-tidy promote qwen2.5-coder:32b         # Add a model to the manifest
+llm-tidy demote llama3:8b                  # Remove a model from the manifest
+llm-tidy prune                             # Interactive removal of untracked models
+llm-tidy prune --older-than 30d --yes      # Reclaim stale models, no prompt
+llm-tidy sync                              # Pull manifest entries that are missing
+```
+
+**Why:** Ollama and hfetch make pulling models easy; nothing makes cleaning them up easy. A few weeks of experiments and the model store turns into a junk drawer with hundreds of GB locked up.
+
+**Highlights:**
+- Single YAML manifest declares the desired state across both backends (Ollama via REST, GGUF via hfetch registry)
+- Tag normalization matches Ollama's `:latest` convention; case-insensitive repo matching for GGUF
+- `--older-than 7d` protects experiments still in progress
+- `--dry-run`, `--yes`, and `--backend` filters compose for safe automation
+- `status --json` for scripting
+
+**Example manifest** (`~/.config/llm-tidy/manifest.yaml`):
+
+```yaml
+version: 1
+
+ollama:
+  - name: qwen2.5-coder:32b
+  - name: llama3.3:70b
+  - name: nomic-embed-text:latest
+
+gguf:
+  - repo: unsloth/Qwen3.5-122B-A10B-GGUF
+    quant: Q4_K_M
+  - repo: mradermacher/Venus-120b-v1.0-i1-GGUF
+```
+
+A starter manifest lives at [`examples/llm-tidy/manifest.yaml`](examples/llm-tidy/manifest.yaml).
+
+**Environment overrides:**
+
+| Variable | Purpose |
+|---|---|
+| `LLM_TIDY_MANIFEST` | Explicit manifest path |
+| `LLM_TIDY_CONFIG_DIR` | Config directory holding `manifest.yaml` |
+| `OLLAMA_HOST` | Ollama server address (same variable Ollama itself reads) |
+
 ## Install
 
 Requires Go 1.25+ (via [devbox](https://www.jetify.com/devbox)):
@@ -138,7 +191,7 @@ Requires Go 1.25+ (via [devbox](https://www.jetify.com/devbox)):
 ```sh
 git clone https://github.com/lazypower/spark-tools.git
 cd spark-tools
-devbox run build    # Builds all three binaries
+devbox run build    # Builds all four binaries
 ```
 
 Or build individually:
@@ -147,6 +200,7 @@ Or build individually:
 devbox run -- go build ./cmd/hfetch
 devbox run -- go build ./cmd/llm-run
 devbox run -- go build ./cmd/llm-bench
+devbox run -- go build ./cmd/llm-tidy
 ```
 
 ## Directory Layout
@@ -158,6 +212,7 @@ All tools follow the [XDG Base Directory Specification](https://specifications.f
 | hfetch | `~/.config/hfetch/` | `~/.local/share/hfetch/` | `~/.cache/hfetch/` |
 | llm-run | `~/.config/llm-run/` | `~/.local/share/llm-run/` | `~/.cache/llm-run/` |
 | llm-bench | `~/.config/llm-bench/` | `~/.local/share/llm-bench/` | `~/.cache/llm-bench/` |
+| llm-tidy | `~/.config/llm-tidy/` | (reuses hfetch data dir) | — |
 
 ## License
 

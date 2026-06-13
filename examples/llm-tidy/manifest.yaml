@@ -1,0 +1,31 @@
+# llm-tidy desired-state manifest
+#
+# Lists the models that should be present on this machine. Anything
+# present locally but not listed here is "untracked" and shown by
+# `llm-tidy status`; `llm-tidy prune` removes untracked models after
+# confirmation.
+#
+# Resolution order:
+#   1. --manifest <path>
+#   2. $LLM_TIDY_MANIFEST
+#   3. $LLM_TIDY_CONFIG_DIR/manifest.yaml
+#   4. ~/.config/llm-tidy/manifest.yaml
+#
+# To bootstrap from the current state, run `llm-tidy init`.
+
+version: 1
+
+# Ollama models, matched against `ollama list`. A name without a tag
+# implies ":latest", matching Ollama's own convention.
+ollama:
+  - name: qwen2.5-coder:32b
+  - name: llama3.3:70b
+  - name: nomic-embed-text:latest
+
+# GGUF models, matched against the hfetch registry by repo (case-insensitive).
+# Omitting `quant` blesses every quant present from that repo; specifying
+# `quant` restricts the match to one file.
+gguf:
+  - repo: unsloth/Qwen3.5-122B-A10B-GGUF
+    quant: Q4_K_M
+  - repo: mradermacher/Venus-120b-v1.0-i1-GGUF
