@@ -14,7 +14,7 @@ default:
     @just --list
 
 # Build all binaries to ~/.local/bin
-build: build-hfetch build-llm-run build-llm-bench build-llm-chat
+build: build-hfetch build-llm-run build-llm-bench build-llm-chat build-llm-tidy
 
 # Build hfetch
 build-hfetch:
@@ -32,6 +32,10 @@ build-llm-bench:
 build-llm-chat:
     {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-chat ./cmd/llm-chat
 
+# Build llm-tidy
+build-llm-tidy:
+    {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-tidy ./cmd/llm-tidy
+
 # Cross-compile all binaries for Linux ARM64 (e.g. DGX Spark)
 build-linux-arm64:
     mkdir -p {{dist-arm64}}
@@ -39,6 +43,7 @@ build-linux-arm64:
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-run ./cmd/llm-run
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-bench ./cmd/llm-bench
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-chat ./cmd/llm-chat
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-tidy ./cmd/llm-tidy
     @echo "Built to {{dist-arm64}}/"
 
 # Cross-compile all binaries for Linux AMD64
@@ -48,6 +53,7 @@ build-linux-amd64:
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-run ./cmd/llm-run
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-bench ./cmd/llm-bench
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-chat ./cmd/llm-chat
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-tidy ./cmd/llm-tidy
     @echo "Built to {{dist-amd64}}/"
 
 # Run all tests
@@ -71,7 +77,7 @@ check: vet test build
 
 # Clean built binaries
 clean:
-    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-bench {{bin}}/llm-chat
+    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-bench {{bin}}/llm-chat {{bin}}/llm-tidy
     rm -rf dist/
 
 # Install (alias for build)
