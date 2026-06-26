@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
+	"github.com/lazypower/spark-tools/pkg/hfetch/quant"
 )
 
 func infoCmd() *cobra.Command {
@@ -47,6 +49,11 @@ func infoCmd() *cobra.Command {
 				fmt.Printf("  Tags: %s\n", dimStyle.Render(fmt.Sprintf("%v", model.Tags)))
 			}
 
+			// Quant format — read from config without pulling the weights.
+			if qi := fetchQuantInfo(context.Background(), client, args[0]); qi != nil {
+				fmt.Printf("  Quantization: %s\n", qi)
+			}
+
 			if showFiles {
 				files, err := client.ListFiles(context.Background(), args[0])
 				if err != nil {
@@ -76,4 +83,32 @@ func infoCmd() *cobra.Command {
 	cmd.Flags().Bool("remote", false, "Force fresh API fetch (skip cache)")
 	tokenFlag(cmd)
 	return cmd
+}
+
+// fetchQuantInfo reads a model's quantization format from its config files
+// without downloading the weights. Returns nil when the model is
+// unquantized or its config is unreadable.
+func fetchQuantInfo(ctx context.Context, client *api.Client, modelID string) *quant.Info {
+	files, err := client.ListFiles(ctx, modelID)
+	if err != nil {
+		return nil
+	}
+	present := make(map[string]bool, len(files))
+	for _, f := range files {
+		present[path.Base(f.Filename)] = true
+	}
+	if !present["config.json"] {
+		return nil
+	}
+	fetch := func(name string) []byte {
+		if !present[name] {
+			return nil
+		}
+		data, err := client.FetchFileRange(ctx, modelID, name, 0, 1<<20)
+		if err != nil {
+			return nil
+		}
+		return data
+	}
+	return quant.Parse(fetch("config.json"), fetch("hf_quant_config.json"), fetch("quantize_config.json"))
 }
