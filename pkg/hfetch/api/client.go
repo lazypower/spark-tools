@@ -88,7 +88,7 @@ func NewClient(opts ...Option) *Client {
 // WhoAmI validates a token against the HuggingFace API and returns
 // the authenticated user's information.
 func (c *Client) WhoAmI(ctx context.Context) (*auth.UserInfo, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, c.apiBase+"/whoami", nil)
+	req, err := c.newRequest(ctx, http.MethodGet, c.apiBase+"/whoami-v2", nil)
 	if err != nil {
 		return nil, err
 	}

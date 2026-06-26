@@ -2,10 +2,10 @@ package auth
 
 // UserInfo holds identity information from HuggingFace.
 type UserInfo struct {
-	Username    string `json:"username"`
+	Username    string `json:"name"`
 	FullName    string `json:"fullname,omitempty"`
 	Email       string `json:"email,omitempty"`
-	AccountType string `json:"accountType,omitempty"`
+	AccountType string `json:"type,omitempty"`
 }
 
 // TokenResult pairs a resolved token with its source for debugging.

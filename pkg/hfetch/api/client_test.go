@@ -25,7 +25,7 @@ func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 
 func TestWhoAmI(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/whoami" {
+		if r.URL.Path != "/api/whoami-v2" {
 			http.NotFound(w, r)
 			return
 		}
@@ -33,10 +33,9 @@ func TestWhoAmI(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		json.NewEncoder(w).Encode(auth.UserInfo{
-			Username: "testuser",
-			FullName: "Test User",
-		})
+		// Mirror the real whoami-v2 response shape: identity is in
+		// "name"/"type", not the legacy "username"/"accountType".
+		io.WriteString(w, `{"type":"user","name":"testuser","fullname":"Test User"}`)
 	})
 	defer srv.Close()
 
