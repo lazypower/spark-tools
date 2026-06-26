@@ -278,6 +278,61 @@ func TestVerify_NonLFS_CorruptSameSize_HardFails(t *testing.T) {
 	}
 }
 
+func TestVerify_CorruptTokenizer_HardFails(t *testing.T) {
+	// Codex P1: a present-but-corrupt tokenizer must not pass (was presence-only).
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tokenizer.json"), []byte("BBBB"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", `{}`),
+		{Type: "file", Filename: "tokenizer.json", Size: 4, BlobID: gitBlob("AAAA")}, // same size, different content
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "tokenizer.json") {
+		t.Errorf("corrupt tokenizer must hard-fail: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_AutoMapArrayValue_StillChecksModules(t *testing.T) {
+	// Codex P2: an array-valued auto_map entry must not abort parsing and
+	// silently skip every module assertion.
+	dir := t.TempDir()
+	cfg := `{"auto_map":{"AutoModelForCausalLM":"modeling_x.XForCausalLM","AutoTokenizer":["tokenization_x.Fast",null]}}`
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", cfg),
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+		plainWithOID(t, dir, "tokenization_x.py", `# tokenizer code`), // array module present + valid
+		// modeling_x.py is in the repo tree but NOT downloaded locally.
+		{Type: "file", Filename: "modeling_x.py", Size: 10, BlobID: gitBlob("0123456789")},
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "modeling_x.py") {
+		t.Errorf("string-valued auto_map module must still be checked despite an array sibling: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_AutoMapModuleCorrupt_HardFails(t *testing.T) {
+	// Codex P2: a present-but-corrupt modeling module must fail (was existence-only).
+	dir := t.TempDir()
+	cfg := `{"auto_map":{"AutoModelForCausalLM":"modeling_x.XForCausalLM"}}`
+	if err := os.WriteFile(filepath.Join(dir, "modeling_x.py"), []byte("BBBB"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", cfg),
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+		{Type: "file", Filename: "modeling_x.py", Size: 4, BlobID: gitBlob("AAAA")}, // same size, different content
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "modeling_x.py") {
+		t.Errorf("corrupt auto_map module must hard-fail: %v", rep.HardFail)
+	}
+}
+
 func hasFail(r *Report, file string) bool {
 	for _, i := range r.HardFail {
 		if i.File == file {

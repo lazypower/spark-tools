@@ -81,6 +81,19 @@ func resolveDest(dest, profile, output, modelID, dataDir string) (string, string
 	return profile, output, nil
 }
 
+// validateSelected ensures every selected remote path was present in the repo
+// file listing. Picker/quant/vllm selections always are; an explicit filename
+// argument may not be (a typo), and that must error rather than silently
+// produce an empty file.
+func validateSelected(selected []string, known map[string]int64) error {
+	for _, f := range selected {
+		if _, ok := known[f]; !ok {
+			return fmt.Errorf("file %q not found in the model's file list", f)
+		}
+	}
+	return nil
+}
+
 func resolveStreams(flagValue int) int {
 	if flagValue > 0 {
 		return flagValue
@@ -229,6 +242,14 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 
 	if len(selectedFiles) == 0 {
 		return fmt.Errorf("no file selected")
+	}
+
+	// Guard against selecting a file not in the repo listing — e.g. a typo'd
+	// explicit filename. Without this, apiFileSource.Head returns size 0 /
+	// empty hash, the download does no work and skips verification, and a
+	// 0-byte file is silently recorded as a complete success.
+	if err := validateSelected(selectedFiles, fileSizeMap); err != nil {
+		return err
 	}
 
 	// Set up output directory.

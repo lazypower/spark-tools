@@ -30,6 +30,17 @@ func writeConfig(t *testing.T, dir, name, content string) api.ModelFile {
 	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
 }
 
+func TestValidateSelected(t *testing.T) {
+	known := map[string]int64{"model.safetensors": 100, "config.json": 2}
+	if err := validateSelected([]string{"model.safetensors", "config.json"}, known); err != nil {
+		t.Errorf("files in the listing should validate: %v", err)
+	}
+	// A typo'd explicit filename must error, not silently produce a 0-byte file.
+	if err := validateSelected([]string{"typo.gguf"}, known); err == nil {
+		t.Error("a file absent from the listing must error")
+	}
+}
+
 func TestResolveDest_VLLMPreset(t *testing.T) {
 	profile, output, err := resolveDest("vllm", "gguf", "", "nvidia/Qwen3.6-35B-A3B-NVFP4", "/data")
 	if err != nil {

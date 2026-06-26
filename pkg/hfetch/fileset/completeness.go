@@ -70,10 +70,9 @@ func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 	// config.json — always required.
 	checkRequired(rep, repoByBase, localDir, "config.json")
 
-	// Tokenizer — at least one variant must be present locally.
-	if !hasAnyTokenizer(localDir) {
-		rep.HardFail = append(rep.HardFail, Issue{"tokenizer", "no tokenizer file present (need at least one)"})
-	}
+	// Tokenizer — at least one variant present, AND every present variant
+	// verified intact (a corrupt tokenizer is not serve-ready).
+	verifyTokenizers(rep, repoByBase, localDir)
 
 	// Quant metadata — required iff the repo tree ships it.
 	for _, q := range []string{"hf_quant_config.json", "quantize_config.json"} {
@@ -82,13 +81,13 @@ func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 		}
 	}
 
-	// Custom code named by config.json auto_map — must have landed. (Glob-all
-	// .py is the include mechanism; auto_map is the extra assertion. It never
-	// names reasoning-parser plugins, so it is an assertion, not the source.)
+	// Custom code named by config.json auto_map — must have landed AND be
+	// intact. (Glob-all .py is the include mechanism; auto_map is the extra
+	// assertion. It never names reasoning-parser plugins, so it is an
+	// assertion, not the source.) checkRequired verifies presence + git-blob
+	// integrity, so a 0-byte or corrupt modeling module fails closed.
 	for _, pyFile := range autoMapModules(filepath.Join(localDir, "config.json")) {
-		if !fileExists(filepath.Join(localDir, pyFile)) {
-			rep.HardFail = append(rep.HardFail, Issue{pyFile, "auto_map module missing (trust-remote-code won't load)"})
-		}
+		checkRequired(rep, repoByBase, localDir, path.Base(pyFile))
 	}
 
 	// Chat template — warn only; may be embedded in tokenizer_config.json.
@@ -268,36 +267,85 @@ func readWeightMap(indexPath string) ([]string, error) {
 	return out, nil
 }
 
+// verifyTokenizers enforces the tokenizer rule: at least one variant present
+// locally, and every present variant the repo ships verified intact. A present-
+// but-corrupt tokenizer (e.g. a 0-byte tokenizer.json) is not serve-ready, so
+// integrity is checked, not just existence.
+func verifyTokenizers(rep *Report, repoByBase map[string]api.ModelFile, localDir string) {
+	present := 0
+	check := func(base string) {
+		if !fileExists(filepath.Join(localDir, base)) {
+			return
+		}
+		present++
+		if _, inRepo := repoByBase[base]; inRepo {
+			checkRequired(rep, repoByBase, localDir, base)
+		}
+	}
+	for _, t := range tokenizerFiles {
+		check(t)
+	}
+	for _, pat := range []string{"*.model", "*.spm"} {
+		matches, _ := filepath.Glob(filepath.Join(localDir, pat))
+		for _, m := range matches {
+			check(filepath.Base(m))
+		}
+	}
+	if present == 0 {
+		rep.HardFail = append(rep.HardFail, Issue{"tokenizer", "no tokenizer file present (need at least one)"})
+	}
+}
+
 // autoMapModules reads config.json's auto_map and returns the .py files its
 // referenced modules resolve to (e.g. "modeling_x.XForCausalLM" → modeling_x.py).
-// Returns nil when config.json is absent or has no auto_map.
+// auto_map values may be a string ("module.Class") or an array of such strings
+// (HF uses ["fast.Class", null] forms, notably for tokenizers) — both are
+// handled so a missing modeling module is never silently skipped. Returns nil
+// when config.json is absent or has no auto_map.
 func autoMapModules(configPath string) []string {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil
 	}
 	var cfg struct {
-		AutoMap map[string]string `json:"auto_map"`
+		AutoMap map[string]json.RawMessage `json:"auto_map"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil
 	}
+
 	seen := map[string]bool{}
 	var out []string
-	for _, v := range cfg.AutoMap {
+	add := func(v string) {
 		// Values may be "repo--module.Class"; the local module is after "--".
 		if i := strings.Index(v, "--"); i >= 0 {
 			v = v[i+2:]
 		}
 		dot := strings.LastIndex(v, ".")
 		if dot <= 0 {
-			continue
+			return
 		}
-		module := v[:dot]
-		file := strings.ReplaceAll(module, ".", "/") + ".py"
+		file := strings.ReplaceAll(v[:dot], ".", "/") + ".py"
 		if !seen[file] {
 			seen[file] = true
 			out = append(out, file)
+		}
+	}
+
+	for _, raw := range cfg.AutoMap {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			add(s)
+			continue
+		}
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) == nil {
+			for _, e := range arr {
+				var es string
+				if json.Unmarshal(e, &es) == nil && es != "" {
+					add(es)
+				}
+			}
 		}
 	}
 	return out
@@ -314,15 +362,6 @@ func tokenizerHasChatTemplate(tokenizerConfigPath string) bool {
 	}
 	raw, ok := cfg["chat_template"]
 	return ok && len(raw) > 0 && string(raw) != "null" && string(raw) != `""`
-}
-
-func hasAnyTokenizer(localDir string) bool {
-	for _, t := range tokenizerFiles {
-		if fileExists(filepath.Join(localDir, t)) {
-			return true
-		}
-	}
-	return anyLocalMatch(localDir, "*.model") || anyLocalMatch(localDir, "*.spm")
 }
 
 func fileExists(path string) bool {
