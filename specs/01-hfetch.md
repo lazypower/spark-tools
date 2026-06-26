@@ -474,7 +474,8 @@ hfetch verify <model_id|path>   Re-hash a downloaded model against canonical HF
                                 SHA256 and run the completeness gate (§14.4). No
                                 re-download. Subsumes verify-models.sh.
   --all                         Sweep every downloaded model (cron-able bitrot check)
-  --baseline                    Hash local files as the manifest (unknown-source models)
+  --output <dir>                Verify a model in a specific directory
+  # --baseline (unknown-source models) — offloaded, see §14.6
 
 hfetch list                     List downloaded models
   --json                        JSON output for scripting
