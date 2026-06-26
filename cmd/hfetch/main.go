@@ -41,6 +41,7 @@ func rootCmd() *cobra.Command {
 		infoCmd(),
 		filesCmd(),
 		pullCmd(),
+		verifyCmd(),
 		listCmd(),
 		pathCmd(),
 		rmCmd(),
