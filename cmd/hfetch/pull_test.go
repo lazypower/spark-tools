@@ -41,6 +41,17 @@ func TestValidateSelected(t *testing.T) {
 	}
 }
 
+func TestCheckFlatCollisions(t *testing.T) {
+	// Distinct basenames are fine.
+	if err := checkFlatCollisions([]string{"model-00001.safetensors", "config.json", "sub/tokenizer_config.json"}); err != nil {
+		t.Errorf("distinct basenames should not collide: %v", err)
+	}
+	// Same basename in different subdirs must fail loud, not silently drop one.
+	if err := checkFlatCollisions([]string{"a/tokenizer.json", "b/tokenizer.json"}); err == nil {
+		t.Error("colliding basenames under flat layout must error")
+	}
+}
+
 func TestResolveDest_VLLMPreset(t *testing.T) {
 	profile, output, err := resolveDest("vllm", "gguf", "", "nvidia/Qwen3.6-35B-A3B-NVFP4", "/data")
 	if err != nil {

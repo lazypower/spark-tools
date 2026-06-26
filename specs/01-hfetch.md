@@ -725,6 +725,7 @@ Both a `vllm` pull and `hfetch verify` run this gate. On any hard-fail it must *
 See §8.2 for the `pull --profile` and `hfetch verify` command definitions. Two layout requirements:
 
 - **Flat output.** vLLM mounts `<dir>` and expects shards + configs at the top level — no nested `repo--flavored/` subdir. Flat layout is the `vllm` profile's default; `--output <dir>` lands files directly in `<dir>`.
+- **Flat-layout boundary.** Because files land flat (by base name), a repo that ships two files with the same base name in different subdirectories (e.g. `a/tokenizer.json` and `b/tokenizer.json`) is not representable. The pull **fails loud** on such a collision rather than silently keeping one — a partial model must never be reported complete. A subdir `auto_map` module that flattening would relocate likewise fails the completeness gate (it is checked at its declared repo path). Repos with meaningful nested structure are out of scope for the `vllm` profile.
 - **`--dest vllm` convenience** (= `--profile vllm --output <data>/vllm/models/<name>`) is implemented; an explicit `--output` overrides the preset's default directory.
 
 ### 14.6 Provenance (P2)

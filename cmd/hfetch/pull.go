@@ -94,6 +94,23 @@ func validateSelected(selected []string, known map[string]int64) error {
 	return nil
 }
 
+// checkFlatCollisions fails loud when two selected files would collapse to the
+// same name under flat layout (e.g. a/tokenizer.json and b/tokenizer.json).
+// Flat layout is intentional — vLLM mounts a flat directory — so a colliding
+// repo shape isn't representable; silently dropping one file would yield a
+// partial model reported as complete.
+func checkFlatCollisions(selected []string) error {
+	seen := make(map[string]string, len(selected))
+	for _, f := range selected {
+		b := filepath.Base(f)
+		if prev, ok := seen[b]; ok {
+			return fmt.Errorf("files %q and %q collapse to %q under flat layout; cannot pull both", prev, f, b)
+		}
+		seen[b] = f
+	}
+	return nil
+}
+
 func resolveStreams(flagValue int) int {
 	if flagValue > 0 {
 		return flagValue
@@ -249,6 +266,9 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 	// empty hash, the download does no work and skips verification, and a
 	// 0-byte file is silently recorded as a complete success.
 	if err := validateSelected(selectedFiles, fileSizeMap); err != nil {
+		return err
+	}
+	if err := checkFlatCollisions(selectedFiles); err != nil {
 		return err
 	}
 
