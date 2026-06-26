@@ -8,13 +8,17 @@ import "errors"
 var (
 	// ErrAuthRequired is returned when an operation requires authentication
 	// but no token is configured.
-	ErrAuthRequired = errors.New("hfetch: authentication required — run `hfetch login`")
+	//
+	// These sentinels carry no binary-name prefix: each tool's top-level
+	// handler prepends its own (`hfetch:`, `llm-run:`), and the message
+	// body passes through tool boundaries unchanged.
+	ErrAuthRequired = errors.New("authentication required — run `hfetch login`")
 
 	// ErrAuthInvalid is returned when the configured token is rejected by
 	// the HuggingFace API (expired, revoked, malformed).
-	ErrAuthInvalid = errors.New("hfetch: token is invalid — run `hfetch login` to re-authenticate")
+	ErrAuthInvalid = errors.New("token is invalid — run `hfetch login` to re-authenticate")
 
 	// ErrGatedModel is returned when the user is authenticated but has not
 	// accepted the model's terms on the HuggingFace website.
-	ErrGatedModel = errors.New("hfetch: model requires license acceptance at huggingface.co")
+	ErrGatedModel = errors.New("model requires license acceptance at huggingface.co")
 )

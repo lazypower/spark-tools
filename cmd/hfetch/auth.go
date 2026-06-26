@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -19,6 +20,7 @@ func loginCmd() *cobra.Command {
 		Short: "Authenticate with HuggingFace",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tokenValue, _ := cmd.Flags().GetString("token")
+			tokenValue = strings.TrimSpace(tokenValue)
 
 			headerStyle := lipgloss.NewStyle().Bold(true)
 			fmt.Printf("\n  %s\n", headerStyle.Render("HuggingFace Login"))
@@ -42,7 +44,7 @@ func loginCmd() *cobra.Command {
 				if err := form.Run(); err != nil {
 					return err
 				}
-				tokenValue = input
+				tokenValue = strings.TrimSpace(input)
 			}
 
 			if tokenValue == "" {

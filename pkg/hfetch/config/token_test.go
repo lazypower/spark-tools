@@ -39,6 +39,39 @@ func TestResolveToken_ConfigFile(t *testing.T) {
 	}
 }
 
+func TestResolveToken_TrimsWhitespace(t *testing.T) {
+	// A pasted token often carries a trailing newline; it must be trimmed
+	// so the Authorization header stays valid.
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("HFETCH_TOKEN", "  hf_envtoken\n")
+		result := ResolveToken("")
+		if result.Token != "hf_envtoken" || result.Source != "env" {
+			t.Errorf("expected trimmed env token, got %+v", result)
+		}
+	})
+
+	t.Run("flag", func(t *testing.T) {
+		result := ResolveToken("hf_flagtoken\n")
+		if result.Token != "hf_flagtoken" || result.Source != "flag" {
+			t.Errorf("expected trimmed flag token, got %+v", result)
+		}
+	})
+
+	t.Run("config", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("HFETCH_TOKEN", "")
+		t.Setenv("HFETCH_CONFIG_DIR", tmp)
+		t.Setenv("HFETCH_HOME", "")
+		if err := os.WriteFile(filepath.Join(tmp, "token.json"), []byte(`{"default":"hf_filetoken\n"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		result := ResolveToken("")
+		if result.Token != "hf_filetoken" || result.Source != "config" {
+			t.Errorf("expected trimmed config token, got %+v", result)
+		}
+	})
+}
+
 func TestResolveToken_None(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HFETCH_TOKEN", "")

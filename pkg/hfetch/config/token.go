@@ -23,11 +23,13 @@ type tokenFile struct {
 //	3. HF CLI compatibility path (~/.cache/huggingface/token)
 //	4. None
 func ResolveToken(override string) auth.TokenResult {
-	if override != "" {
+	// Trim every source: a stray newline or space from a paste produces an
+	// invalid `Authorization: Bearer <token>\n` header and a confusing 401.
+	if override = strings.TrimSpace(override); override != "" {
 		return auth.TokenResult{Token: override, Source: "flag"}
 	}
 
-	if v := os.Getenv("HFETCH_TOKEN"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("HFETCH_TOKEN")); v != "" {
 		return auth.TokenResult{Token: v, Source: "env"}
 	}
 
@@ -79,7 +81,7 @@ func readTokenFile(path string) string {
 	if err := json.Unmarshal(data, &tf); err != nil {
 		return ""
 	}
-	return tf.Default
+	return strings.TrimSpace(tf.Default)
 }
 
 func readHFCompatToken() string {
