@@ -26,7 +26,7 @@ We need a self-contained Go binary that speaks the HuggingFace Hub API natively,
 - Training, fine-tuning, or inference. This is a model logistics tool.
 - Supporting every HuggingFace API endpoint. Focus on model discovery, download, and metadata.
 - Replicating the full `huggingface_hub` Python library surface area.
-- Safetensors/PyTorch weight conversion. Out of scope — we consume GGUF directly.
+- Safetensors/PyTorch **weight conversion**. Out of scope. hfetch transports and verifies complete safetensors filesets for serving (§14), but never converts weight formats or interprets quantization (NVFP4/FP8/GPTQ) numerically — that is data we move and report, not math we perform.
 
 ## 4. Architecture
 
@@ -461,12 +461,20 @@ hfetch files <model_id>         List files in a model repo
 
 hfetch pull <model_id>          Download a model
   [filename]                    Specific file (default: interactive selection)
+  --profile <gguf|vllm>         Fileset selector (default: gguf). vllm pulls the
+                                complete serve-ready set + runs completeness gate (§14)
   --quant <type>                Auto-select file by quantization type
-  --output <dir>                Override download directory
+  --output <dir>                Override download directory (flat layout under vllm; §14.5)
   --streams <n>                 Parallel download streams (default: 4)
   --max-bandwidth <rate>        Bandwidth limit (e.g. "100MB/s")
   --verify                      Re-verify SHA256 after download (default: true)
   --token <value>               Override token for this invocation
+
+hfetch verify <model_id|path>   Re-hash a downloaded model against canonical HF
+                                SHA256 and run the completeness gate (§14.4). No
+                                re-download. Subsumes verify-models.sh.
+  --all                         Sweep every downloaded model (cron-able bitrot check)
+  --baseline                    Hash local files as the manifest (unknown-source models)
 
 hfetch list                     List downloaded models
   --json                        JSON output for scripting
@@ -655,6 +663,113 @@ Downstream tools (llm-run auto-pull, llm-bench pre-flight) must check for these 
 
 - **Model conversion:** If GGUF conversion from safetensors becomes feasible in pure Go, this would be the natural home for it.
 - **Hub caching protocol:** HuggingFace is evolving their caching/mirroring protocols. Monitor and adapt.
+- **User-defined profiles:** §14 ships two built-in fileset profiles over one selector. Letting users declare their own profiles (custom include/exclude sets) is a natural extension once the built-ins prove out.
+
+## 14. Serve-Ready Profiles & Completeness Verification (vLLM)
+
+### 14.1 Motivation
+
+hfetch began as a GGUF picker: one repo, pick one quant file, done. Serving a model under vLLM is the opposite shape — it needs a *complete, curated set* of many files (all weight shards + configs + tokenizer + quant metadata + custom code), where a single missing file either silently corrupts the model (a dropped shard → vLLM globs `*.safetensors` and serves partial weights) or prevents it loading at all (a dropped `modeling_*.py`). This was previously hand-managed with `wget` file lists plus a bash `preflight_check`; this section folds that hard-won knowledge into hfetch.
+
+The curated include set is pinned in the oracle doc `gitea.wabash.place/lab/vllm-config:docs/vllm-fileset.md`, distilled from hand-pulling ~8 NVFP4/GPTQ/compressed-tensors/vision models. That doc is the authoritative source for §14.3; this spec summarizes it and the implementation encodes it.
+
+**Scope guard — what this is NOT.** hfetch does not interpret NVFP4/FP8/GPTQ numerically, run kernels, or convert weight formats (still a non-goal, §3). "vLLM / NVFP4 support" means exactly: *fetch the complete fileset without dropping quant metadata, and verify completeness, failing loud.* The quant format is data we transport and (optionally) report, never math we perform. Pure Go, zero cgo.
+
+### 14.2 Profiles
+
+A **profile** is a named fileset selector applied over a repo's file tree. Two built-in profiles share one selection mechanism:
+
+- `gguf` — the existing behavior: GGUF-first, pick one quant file. `gguf/filter.go` becomes this profile's selector.
+- `vllm` — serve-ready: fetch the complete curated safetensors fileset (§14.3) and run the completeness gate (§14.4).
+
+Profiles are selected with `--profile` on `pull`. User-defined profiles are explicitly **out of scope for the initial implementation** (see §13) — ship the two built-ins over a clean selector and defer extensibility.
+
+### 14.3 The `vllm` Profile Fileset
+
+Files partition into completeness tiers (§14.4). Summary of the oracle:
+
+- **Weights:** `*.safetensors` — glob ALL (some repos ship weights not in the index, e.g. an MTP head), plus `model.safetensors.index.json`.
+- **Quant metadata (pull iff present in the tree):** `hf_quant_config.json` (ModelOpt NVFP4/FP8), `quantize_config.json` (GPTQ). compressed-tensors repos ship neither — quant lives inside `config.json`'s `quantization_config`. Never hard-require these universally; their *presence* in the tree means the model needs them.
+- **Config:** `config.json` (required), `generation_config.json`, `configuration.json` (if present).
+- **Tokenizer (pull every variant present):** `tokenizer.json`, `tokenizer_config.json`, `tekken.json`, `vocab.json`, `merges.txt`, `special_tokens_map.json`, `added_tokens.json`, `*.model`/`*.spm`.
+- **Chat template:** `chat_template.jinja` / `*.jinja` (may instead be embedded in `tokenizer_config.json`).
+- **Custom code (trust-remote-code):** `*.py` — glob ALL. Includes modeling / configuration / `__init__.py` AND reasoning-parser plugins (`*reasoning_parser*.py`). `config.json`'s `auto_map` names only the modeling modules and NEVER the parser plugins (those are named on the vLLM launch flag) — so `auto_map` is used **only as an extra assertion** that its named modeling modules landed, never as the include source. Using `auto_map` as the include source silently drops parser plugins — the Nemotron failure mode.
+- **Multimodal (if present):** `preprocessor_config.json`, `processor_config.json`, `video_preprocessor_config.json`.
+- **Optional (pull if present, never fail):** system-prompt `*.txt`.
+- **Exclude (never pull for serving):** `README.md`, `.gitattributes`, `recipe.yaml`, `*.png`, `evaluation.json`, `preds.json`, `.quant_summary.txt`, doc cards (`bias.md`, `explainability.md`, `privacy.md`, `safety.md`).
+
+### 14.4 Completeness Gate (P0 — the silent-corruption killer)
+
+Both a `vllm` pull and `hfetch verify` run this gate. On any hard-fail it must **exit non-zero naming the offending file** — "downloaded 8 of 10 shards, exit 0" is the exact failure class this closes.
+
+**Weight completeness:**
+- `model.safetensors.index.json` present → required shard set = `set(weight_map.values())` **∪** any other `*.safetensors` in the tree. Glob, don't derive solely from the index — extra weight files (e.g. `mtp.safetensors`) are real and index-absent. The index file is itself required when there is more than one shard.
+- Index absent + exactly one `*.safetensors` → valid single-shard model (e.g. Devstral); verify that one file. *(The bash oracle's `preflight_check()` only handled the index case — this single-shard branch is a deliberate gap-close.)*
+- Index absent + multiple `*.safetensors` → suspicious; hard-fail.
+
+**Per-file verification:** for each required file, assert present + size matches + SHA256 matches the canonical upstream hash.
+
+**Hash source — one API call, not N HEADs.** `GET /api/models/<repo>/tree/main?recursive=true` returns `lfs.oid` (the canonical SHA256) and `lfs.size` for every LFS file. hfetch *already calls this endpoint* in `ListFiles`; capturing `lfs.oid`/`lfs.size` onto `ModelFile` makes the gate a single listing call plus local hashing, with no per-file HEAD requests. (`verify-models.sh` confirms this path — it reads `lfs.oid` straight from the recursive tree listing. Non-LFS small files carry a git blob oid, not a content SHA256, so presence + size is the check for those.)
+
+**Tier table:**
+
+| Tier | Files | Missing behavior |
+|---|---|---|
+| **Hard-fail** | every required `weight_map` shard (or the single `.safetensors`); `config.json`; ≥1 tokenizer file; any `auto_map`-named `.py`; `hf_quant_config.json`/`quantize_config.json` *if present in the repo tree* | non-zero exit, named file |
+| **Warn** | `chat_template.jinja`, `generation_config.json` | proceed, warn |
+| **Optional** | system-prompt `*.txt`, multimodal configs | silent (pull-if-present) |
+
+### 14.5 CLI & Output Layout
+
+See §8.2 for the `pull --profile` and `hfetch verify` command definitions. Two layout requirements:
+
+- **Flat output.** vLLM mounts `<dir>` and expects shards + configs at the top level — no nested `repo--flavored/` subdir. Flat layout is the `vllm` profile's default; `--output <dir>` lands files directly in `<dir>`.
+- **`--dest vllm` convenience** (= `--profile vllm --output <data>/vllm/models/<name>`) is a P2 nicety, deferred.
+
+### 14.6 Provenance (P2)
+
+Store the source repo + canonical manifest (the `lfs.oid` set) alongside the model in the registry, so `verify` and re-pull know the origin without an external `REPO_MAP`. This mirrors `verify-models.sh`'s committed `checksums/<dir>.sha256` + `REPO_MAP`, but owned by hfetch's registry manifest. Follow-on, not in the spike.
+
+### 14.7 Quant Reporting (P1 follow-on)
+
+`hfetch info` reads `config.json` (and `hf_quant_config.json` if present) to report `quant_method` (modelopt | compressed-tensors | gptq), `quant_algo` (NVFP4 | FP8 | W4A16 | …), and whether the KV-cache is FP8 — so a model's serving format is visible without pulling it. Read-only JSON parsing; no format interpretation.
+
+### 14.8 Library API Additions
+
+```go
+// Profile names a fileset selector (§14.2).
+type Profile string
+
+const (
+    ProfileGGUF Profile = "gguf"
+    ProfileVLLM Profile = "vllm"
+)
+
+// PullOptions gains:
+//   Profile    Profile // default ProfileGGUF
+//   FlatOutput bool     // files land directly in OutputDir (vLLM mount layout)
+
+// VerifyModel runs the completeness gate (§14.4) against an on-disk model,
+// using canonical hashes from the repo tree listing. modelRef may be a
+// registry id or a local path.
+func (c *Client) VerifyModel(ctx context.Context, modelRef string, opts VerifyOptions) (*VerifyReport, error)
+
+type VerifyReport struct {
+    Complete bool
+    HardFail []FileIssue // missing or hash/size-mismatched required files
+    Warnings []FileIssue
+}
+```
+
+`ModelFile` (in `pkg/api`) gains `LFSOID string` and `LFSSize int64`, populated from the tree listing.
+
+### 14.9 Implementation Notes & Phasing
+
+- Selection logic lives in a new `pkg/hfetch/fileset` package: the profile glob sets + the completeness gate. `download` gains multi-file orchestration; the existing `gguf/filter.go` becomes the `gguf` profile's selector behind the same interface.
+- **Spike slice = P0.1 + P0.2:** the `vllm` profile fileset + the completeness gate, spec-first (this section). That alone retires the `wget` curation and the silent-corruption class.
+- **P1.3 next:** `hfetch verify --all` — same tree-listing + hash path.
+- **P1.5 / P2 after:** quant reporting, provenance manifest, `--dest vllm`.
+- Oracle to lift verbatim from `gitea.wabash.place/lab/vllm-config`: `docs/vllm-fileset.md` (include set), `run.sh` `preflight_check()` (gate logic), `verify-models.sh` (hash verify + REPO_MAP).
 - **Model cards:** Parsing and displaying model card content (currently markdown) for quick reference.
 - **Collections/tags:** Supporting HuggingFace collections for curated model groups.
 - **Multi-token profiles:** `token.json` schema reserves space for named token profiles (e.g., personal vs. org tokens). Current schema: `{"default": "hf_..."}`. Future: `{"default": "hf_...", "profiles": {"work": "hf_...", "personal": "hf_..."}}`. Not implemented now — schema is forward-compatible.
