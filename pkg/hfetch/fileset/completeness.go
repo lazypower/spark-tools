@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,7 +53,11 @@ var tokenizerFiles = []string{
 func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 	rep := &Report{}
 
+	// repoByBase keys flat files by base name (weights/configs live at the
+	// root); repoByPath keys by full repo-relative path (needed for auto_map
+	// modules that may sit in a subdirectory).
 	repoByBase := make(map[string]api.ModelFile, len(repoFiles))
+	repoByPath := make(map[string]api.ModelFile, len(repoFiles))
 	var safetensors []string
 	for _, f := range repoFiles {
 		if f.Type == "directory" {
@@ -60,6 +65,7 @@ func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 		}
 		base := path.Base(f.Filename)
 		repoByBase[base] = f
+		repoByPath[f.Filename] = f
 		if strings.HasSuffix(base, ".safetensors") {
 			safetensors = append(safetensors, base)
 		}
@@ -84,10 +90,13 @@ func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 	// Custom code named by config.json auto_map — must have landed AND be
 	// intact. (Glob-all .py is the include mechanism; auto_map is the extra
 	// assertion. It never names reasoning-parser plugins, so it is an
-	// assertion, not the source.) checkRequired verifies presence + git-blob
-	// integrity, so a 0-byte or corrupt modeling module fails closed.
+	// assertion, not the source.) Modules are checked at their full repo path
+	// — a subdir module that the flat download collapsed fails closed rather
+	// than passing on a flattened basename. External "repo--module" references
+	// are excluded by autoMapModules (their code lives in another repo).
 	for _, pyFile := range autoMapModules(filepath.Join(localDir, "config.json")) {
-		checkRequired(rep, repoByBase, localDir, path.Base(pyFile))
+		f, inRepo := repoByPath[pyFile]
+		verifyFile(rep, f, inRepo, filepath.Join(localDir, filepath.FromSlash(pyFile)), pyFile)
 	}
 
 	// Chat template — warn only; may be embedded in tokenizer_config.json.
@@ -149,20 +158,26 @@ func verifyWeights(rep *Report, repoByBase map[string]api.ModelFile, safetensors
 	}
 }
 
-// checkRequired verifies one required file: present in the repo, present
-// locally, size-matched, and (for LFS files) hash-matched against the canonical
-// upstream SHA256. Each distinct failure appends a named hard-fail Issue.
+// checkRequired verifies one required flat (root-level) file by base name.
 func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, base string) {
 	f, inRepo := repoByBase[base]
+	verifyFile(rep, f, inRepo, filepath.Join(localDir, base), base)
+}
+
+// verifyFile is the verification core: the file must be in the repo listing,
+// present at localPath, size-matched, and content-matched — SHA256 for LFS
+// files (oid is the content hash), git-blob SHA1 for non-LFS git files (oid is
+// the blob id). name is the display label. Each distinct failure appends a
+// named hard-fail Issue.
+func verifyFile(rep *Report, f api.ModelFile, inRepo bool, localPath, name string) {
 	if !inRepo {
-		rep.HardFail = append(rep.HardFail, Issue{base, "required file not in repo"})
+		rep.HardFail = append(rep.HardFail, Issue{name, "required file not in repo"})
 		return
 	}
 
-	lp := filepath.Join(localDir, base)
-	st, err := os.Stat(lp)
+	st, err := os.Stat(localPath)
 	if err != nil {
-		rep.HardFail = append(rep.HardFail, Issue{base, "missing locally"})
+		rep.HardFail = append(rep.HardFail, Issue{name, "missing locally"})
 		return
 	}
 
@@ -171,7 +186,7 @@ func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, b
 		wantSize = f.LFS.Size
 	}
 	if wantSize > 0 && st.Size() != wantSize {
-		rep.HardFail = append(rep.HardFail, Issue{base,
+		rep.HardFail = append(rep.HardFail, Issue{name,
 			fmt.Sprintf("size mismatch: have %d bytes, want %d", st.Size(), wantSize)})
 		return
 	}
@@ -181,22 +196,22 @@ func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, b
 	// two hash types. (This is what caught hfetch's own 0-byte download bug.)
 	switch {
 	case f.LFS != nil && f.LFS.OID != "":
-		got, err := hashFile(lp)
+		got, err := hashFile(localPath)
 		if err != nil {
-			rep.HardFail = append(rep.HardFail, Issue{base, "hash read error: " + err.Error()})
+			rep.HardFail = append(rep.HardFail, Issue{name, "hash read error: " + err.Error()})
 			return
 		}
 		if got != f.LFS.OID {
-			rep.HardFail = append(rep.HardFail, Issue{base, "SHA256 mismatch vs upstream (corrupt or truncated)"})
+			rep.HardFail = append(rep.HardFail, Issue{name, "SHA256 mismatch vs upstream (corrupt or truncated)"})
 		}
 	case isGitSHA1(f.BlobID):
-		got, err := gitBlobSHA1(lp)
+		got, err := gitBlobSHA1(localPath)
 		if err != nil {
-			rep.HardFail = append(rep.HardFail, Issue{base, "hash read error: " + err.Error()})
+			rep.HardFail = append(rep.HardFail, Issue{name, "hash read error: " + err.Error()})
 			return
 		}
 		if got != f.BlobID {
-			rep.HardFail = append(rep.HardFail, Issue{base, "git blob SHA1 mismatch vs upstream (corrupt or truncated)"})
+			rep.HardFail = append(rep.HardFail, Issue{name, "git blob SHA1 mismatch vs upstream (corrupt or truncated)"})
 		}
 	}
 }
@@ -267,33 +282,27 @@ func readWeightMap(indexPath string) ([]string, error) {
 	return out, nil
 }
 
-// verifyTokenizers enforces the tokenizer rule: at least one variant present
-// locally, and every present variant the repo ships verified intact. A present-
-// but-corrupt tokenizer (e.g. a 0-byte tokenizer.json) is not serve-ready, so
-// integrity is checked, not just existence.
+// verifyTokenizers enforces the tokenizer rule against the repo listing (the
+// authority): every tokenizer variant the repo ships must be present locally
+// and intact, and the repo must ship at least one. Keying off the repo — not
+// local files — means a stale tokenizer left in a reused output dir can't
+// satisfy the requirement for a model whose repo supplied none.
 func verifyTokenizers(rep *Report, repoByBase map[string]api.ModelFile, localDir string) {
-	present := 0
-	check := func(base string) {
-		if !fileExists(filepath.Join(localDir, base)) {
-			return
-		}
-		present++
-		if _, inRepo := repoByBase[base]; inRepo {
+	repoTokenizers := 0
+	for base := range repoByBase {
+		if isTokenizerFile(base) {
+			repoTokenizers++
 			checkRequired(rep, repoByBase, localDir, base)
 		}
 	}
-	for _, t := range tokenizerFiles {
-		check(t)
+	if repoTokenizers == 0 {
+		rep.HardFail = append(rep.HardFail, Issue{"tokenizer", "no tokenizer file in repo (model is not independently serve-ready)"})
 	}
-	for _, pat := range []string{"*.model", "*.spm"} {
-		matches, _ := filepath.Glob(filepath.Join(localDir, pat))
-		for _, m := range matches {
-			check(filepath.Base(m))
-		}
-	}
-	if present == 0 {
-		rep.HardFail = append(rep.HardFail, Issue{"tokenizer", "no tokenizer file present (need at least one)"})
-	}
+}
+
+func isTokenizerFile(base string) bool {
+	return slices.Contains(tokenizerFiles, base) ||
+		strings.HasSuffix(base, ".model") || strings.HasSuffix(base, ".spm")
 }
 
 // autoMapModules reads config.json's auto_map and returns the .py files its
@@ -317,14 +326,18 @@ func autoMapModules(configPath string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(v string) {
-		// Values may be "repo--module.Class"; the local module is after "--".
-		if i := strings.Index(v, "--"); i >= 0 {
-			v = v[i+2:]
+		// "repo--module.Class" references code hosted in ANOTHER repo, fetched
+		// separately by Transformers — it is not a file in THIS repo, so it is
+		// not a local completeness requirement.
+		if strings.Contains(v, "--") {
+			return
 		}
 		dot := strings.LastIndex(v, ".")
 		if dot <= 0 {
 			return
 		}
+		// The module path before the class may use "." or "/" as separator;
+		// normalize to a repo-relative .py path (subdir modules preserved).
 		file := strings.ReplaceAll(v[:dot], ".", "/") + ".py"
 		if !seen[file] {
 			seen[file] = true

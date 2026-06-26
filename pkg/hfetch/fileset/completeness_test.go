@@ -333,6 +333,62 @@ func TestVerify_AutoMapModuleCorrupt_HardFails(t *testing.T) {
 	}
 }
 
+func TestVerify_StaleTokenizerNotInRepo_HardFails(t *testing.T) {
+	// Codex round 2: a stale tokenizer left in a reused output dir must NOT
+	// satisfy the tokenizer requirement for a model whose repo ships none.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tokenizer.json"), []byte("stale from another model"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{ // repo has NO tokenizer file
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", `{}`),
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "tokenizer") {
+		t.Errorf("a model whose repo ships no tokenizer must hard-fail, not pass on a stale local file: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_SubdirAutoMapModule_FailsClosedWhenFlattened(t *testing.T) {
+	// Codex round 2: a subdir auto_map module the flat download collapsed must
+	// fail closed (checked at its full repo path), not pass on a basename.
+	dir := t.TempDir()
+	cfg := `{"auto_map":{"AutoModelForCausalLM":"custom/modeling_x.XForCausalLM"}}`
+	// Flat download placed it at the root, but the repo declares it in custom/.
+	if err := os.WriteFile(filepath.Join(dir, "modeling_x.py"), []byte("code"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", cfg),
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+		{Type: "file", Filename: "custom/modeling_x.py", Size: 4, BlobID: gitBlob("code")},
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "custom/modeling_x.py") {
+		t.Errorf("subdir auto_map module not at its declared path must fail closed: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_ExternalAutoMapRepo_NotRequiredLocally(t *testing.T) {
+	// Codex round 2: a "repo--module.Class" reference points at code hosted in
+	// ANOTHER repo. It must NOT be required as a local file (false fail).
+	dir := t.TempDir()
+	cfg := `{"auto_map":{"AutoModelForCausalLM":"other-org/code-repo--modeling_x.XForCausalLM"}}`
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", cfg),
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+		plainWithOID(t, dir, "generation_config.json", `{}`),
+		plainWithOID(t, dir, "chat_template.jinja", `x`),
+	}
+	rep, _ := Verify(repo, dir)
+	if !rep.Complete() {
+		t.Errorf("external repo-- auto_map code must not be required locally (false fail): %v", rep.HardFail)
+	}
+}
+
 func hasFail(r *Report, file string) bool {
 	for _, i := range r.HardFail {
 		if i.File == file {
