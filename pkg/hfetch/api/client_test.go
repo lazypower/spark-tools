@@ -231,20 +231,27 @@ func TestHeadFile(t *testing.T) {
 	}
 }
 
-func TestHeadFile_FallbackETag(t *testing.T) {
+// Non-LFS git files expose only an ETag (a git-blob SHA1), never an
+// X-Linked-Etag. HeadFile must NOT return that SHA1 as a content SHA256 — doing
+// so produced a guaranteed verify mismatch. It returns an empty hash (size is
+// still read), and callers verify non-LFS content by git-blob SHA1 instead.
+func TestHeadFile_NonLFS_NoContentHash(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "100")
-		w.Header().Set("ETag", "\"fallbackhash\"")
+		w.Header().Set("ETag", "\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2\"") // git blob SHA1
 		w.WriteHeader(http.StatusOK)
 	})
 	defer srv.Close()
 
-	_, sha, err := client.HeadFile(context.Background(), "test/model", "file.bin")
+	size, sha, err := client.HeadFile(context.Background(), "test/model", "config.json")
 	if err != nil {
 		t.Fatalf("HeadFile: %v", err)
 	}
-	if sha != "fallbackhash" {
-		t.Errorf("expected fallbackhash, got %q", sha)
+	if sha != "" {
+		t.Errorf("non-LFS file must not return a content hash; got %q", sha)
+	}
+	if size != 100 {
+		t.Errorf("expected size 100, got %d", size)
 	}
 }
 

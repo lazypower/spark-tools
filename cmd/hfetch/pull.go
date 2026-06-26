@@ -279,6 +279,8 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 			client:  client,
 			modelID: modelID,
 			file:    remoteFile, // full path for HF API URL
+			size:    fileSizeMap[remoteFile],
+			sha256:  fileHashMap[remoteFile], // LFS content hash; "" for non-LFS git files
 		}
 
 		startTime := time.Now()
@@ -425,14 +427,24 @@ func issueStrings(issues []fileset.Issue) []string {
 }
 
 // apiFileSource adapts the HF API client to the download.FileSource interface.
+//
+// size and sha256 come from the repo tree listing (the single authority for
+// file metadata), not a per-file HEAD: HEAD's size/hash logic only works for
+// LFS files, and for non-LFS git files it returns size 0 (→ a silent 0-byte
+// download) and a git-blob SHA1 mislabeled as a content SHA256 (→ a guaranteed
+// verify mismatch). sha256 is the LFS content hash, empty for non-LFS files —
+// download verification is correctly skipped for those (size + the
+// completeness gate's git-blob check cover their integrity).
 type apiFileSource struct {
 	client  *api.Client
 	modelID string
 	file    string
+	size    int64
+	sha256  string
 }
 
 func (s *apiFileSource) Head(ctx context.Context) (int64, string, error) {
-	return s.client.HeadFile(ctx, s.modelID, s.file)
+	return s.size, s.sha256, nil
 }
 
 func (s *apiFileSource) Download(ctx context.Context, offset int64) (io.ReadCloser, int64, error) {

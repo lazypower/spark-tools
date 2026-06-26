@@ -1,14 +1,35 @@
 package fileset
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 )
+
+// gitBlob returns the git blob object id (SHA1) of content — the oid HF reports
+// for non-LFS files.
+func gitBlob(content string) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(content))
+	h.Write([]byte(content))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// plainWithOID writes a non-LFS file and returns a ModelFile carrying its git
+// blob oid, as the repo tree listing would.
+func plainWithOID(t *testing.T, dir, name, content string) api.ModelFile {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content)), BlobID: gitBlob(content)}
+}
 
 // writeLocal writes content to dir/name and returns an LFS ModelFile whose
 // OID/Size match the bytes — i.e. a correctly-downloaded shard.
@@ -204,6 +225,56 @@ func TestVerify_NoTokenizer_HardFails(t *testing.T) {
 	rep, _ := Verify(repo, dir)
 	if !hasFail(rep, "tokenizer") {
 		t.Errorf("missing all tokenizers must hard-fail: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_NonLFS_GitBlobMatch_Passes(t *testing.T) {
+	dir := t.TempDir()
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		plainWithOID(t, dir, "config.json", `{"architectures":["X"]}`),
+		plainWithOID(t, dir, "tokenizer.json", `{"v":1}`),
+		plainWithOID(t, dir, "generation_config.json", `{}`),
+		plainWithOID(t, dir, "chat_template.jinja", `{{ messages }}`),
+	}
+	rep, _ := Verify(repo, dir)
+	if !rep.Complete() {
+		t.Fatalf("correct non-LFS files should pass git-blob verification: %v", rep.HardFail)
+	}
+}
+
+func TestVerify_NonLFS_EmptyFile_HardFails(t *testing.T) {
+	// The reported bug: a non-LFS file came down as 0 bytes. The gate must
+	// fail closed and name it (here via size, with the git oid expecting content).
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		{Type: "file", Filename: "config.json", Size: 7, BlobID: gitBlob(`{"a":1}`)},
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "config.json") {
+		t.Errorf("empty non-LFS file must hard-fail (fail closed): %v", rep.HardFail)
+	}
+}
+
+func TestVerify_NonLFS_CorruptSameSize_HardFails(t *testing.T) {
+	// Same byte length, different content — only the git-blob hash catches this.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("BBBBBBBB"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := []api.ModelFile{
+		writeLocal(t, dir, "model.safetensors", "weights"),
+		{Type: "file", Filename: "config.json", Size: 8, BlobID: gitBlob("AAAAAAAA")},
+		plainWithOID(t, dir, "tokenizer.json", `{}`),
+	}
+	rep, _ := Verify(repo, dir)
+	if !hasFail(rep, "config.json") {
+		t.Errorf("content-corrupt non-LFS file (same size) must hard-fail via git blob SHA1: %v", rep.HardFail)
 	}
 }
 

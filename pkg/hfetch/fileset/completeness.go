@@ -1,6 +1,7 @@
 package fileset
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -176,9 +177,11 @@ func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, b
 		return
 	}
 
-	// Hash-verify only LFS files: their oid is the content SHA256. Non-LFS
-	// small files carry a git blob oid, so presence + size is the check.
-	if f.LFS != nil && f.LFS.OID != "" {
+	// LFS files: oid is the content SHA256. Non-LFS git files: oid is a git
+	// blob SHA1, so verify content against that instead — never compare the
+	// two hash types. (This is what caught hfetch's own 0-byte download bug.)
+	switch {
+	case f.LFS != nil && f.LFS.OID != "":
 		got, err := hashFile(lp)
 		if err != nil {
 			rep.HardFail = append(rep.HardFail, Issue{base, "hash read error: " + err.Error()})
@@ -187,7 +190,44 @@ func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, b
 		if got != f.LFS.OID {
 			rep.HardFail = append(rep.HardFail, Issue{base, "SHA256 mismatch vs upstream (corrupt or truncated)"})
 		}
+	case isGitSHA1(f.BlobID):
+		got, err := gitBlobSHA1(lp)
+		if err != nil {
+			rep.HardFail = append(rep.HardFail, Issue{base, "hash read error: " + err.Error()})
+			return
+		}
+		if got != f.BlobID {
+			rep.HardFail = append(rep.HardFail, Issue{base, "git blob SHA1 mismatch vs upstream (corrupt or truncated)"})
+		}
 	}
+}
+
+// gitBlobSHA1 computes a file's git blob object id: SHA1("blob <size>\x00" +
+// content). This is the oid HuggingFace reports for non-LFS files, so it lets
+// the gate verify their content (catching the empty/truncated-file case)
+// without a content SHA256, which HF does not provide for git-stored files.
+func gitBlobSHA1(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(data))
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// isGitSHA1 reports whether s looks like a git object id (40 hex chars).
+func isGitSHA1(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func hashFile(path string) (string, error) {

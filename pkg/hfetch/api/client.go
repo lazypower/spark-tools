@@ -247,12 +247,12 @@ func (c *Client) HeadFile(ctx context.Context, modelID, filename string) (size i
 		return 0, "", fmt.Errorf("HEAD request HTTP %d", resp.StatusCode)
 	}
 
-	// X-Linked-Etag is the LFS SHA256, only present on the HF response.
-	sha256 = resp.Header.Get("X-Linked-Etag")
-	if sha256 == "" {
-		sha256 = resp.Header.Get("ETag")
-	}
-	sha256 = strings.Trim(sha256, "\"")
+	// X-Linked-Etag is the LFS content SHA256, present only for LFS files.
+	// Non-LFS git files expose only an ETag, which is a git-blob SHA1 — NOT a
+	// content hash. Returning it here as "sha256" causes a guaranteed verify
+	// mismatch (SHA1 compared against a computed SHA256), so leave it empty:
+	// callers verify non-LFS files by size and git-blob SHA1 instead.
+	sha256 = strings.Trim(resp.Header.Get("X-Linked-Etag"), "\"")
 
 	// For redirect responses, Content-Length is the redirect body size,
 	// NOT the actual file size. Use X-Linked-Size or follow the redirect.
