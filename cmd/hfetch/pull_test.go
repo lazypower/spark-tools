@@ -30,6 +30,42 @@ func writeConfig(t *testing.T, dir, name, content string) api.ModelFile {
 	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
 }
 
+func TestResolveDest_VLLMPreset(t *testing.T) {
+	profile, output, err := resolveDest("vllm", "gguf", "", "nvidia/Qwen3.6-35B-A3B-NVFP4", "/data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile != "vllm" {
+		t.Errorf("dest vllm should set profile=vllm, got %q", profile)
+	}
+	if output != "/data/vllm/models/Qwen3.6-35B-A3B-NVFP4" {
+		t.Errorf("unexpected flat output dir: %q", output)
+	}
+}
+
+func TestResolveDest_ExplicitOutputWins(t *testing.T) {
+	_, output, err := resolveDest("vllm", "gguf", "/srv/models/x", "org/model", "/data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "/srv/models/x" {
+		t.Errorf("explicit --output should be respected, got %q", output)
+	}
+}
+
+func TestResolveDest_Empty_NoOp(t *testing.T) {
+	profile, output, err := resolveDest("", "gguf", "", "org/model", "/data")
+	if err != nil || profile != "gguf" || output != "" {
+		t.Errorf("empty dest should be a no-op, got profile=%q output=%q err=%v", profile, output, err)
+	}
+}
+
+func TestResolveDest_Unknown_Errors(t *testing.T) {
+	if _, _, err := resolveDest("ollama", "gguf", "", "org/model", "/data"); err == nil {
+		t.Error("unknown --dest must error")
+	}
+}
+
 func TestReportCompleteness_CompleteModelPasses(t *testing.T) {
 	dir := t.TempDir()
 	repo := []api.ModelFile{

@@ -724,11 +724,13 @@ Both a `vllm` pull and `hfetch verify` run this gate. On any hard-fail it must *
 See §8.2 for the `pull --profile` and `hfetch verify` command definitions. Two layout requirements:
 
 - **Flat output.** vLLM mounts `<dir>` and expects shards + configs at the top level — no nested `repo--flavored/` subdir. Flat layout is the `vllm` profile's default; `--output <dir>` lands files directly in `<dir>`.
-- **`--dest vllm` convenience** (= `--profile vllm --output <data>/vllm/models/<name>`) is a P2 nicety, deferred.
+- **`--dest vllm` convenience** (= `--profile vllm --output <data>/vllm/models/<name>`) is implemented; an explicit `--output` overrides the preset's default directory.
 
 ### 14.6 Provenance (P2)
 
-Store the source repo + canonical manifest (the `lfs.oid` set) alongside the model in the registry, so `verify` and re-pull know the origin without an external `REPO_MAP`. This mirrors `verify-models.sh`'s committed `checksums/<dir>.sha256` + `REPO_MAP`, but owned by hfetch's registry manifest. Follow-on, not in the spike.
+The registry is keyed by model id (= source repo), so origin is intrinsic — no external `REPO_MAP` is needed for re-pull or `verify`. On pull, each file's canonical upstream SHA256 (`lfs.oid`) is recorded in the registry manifest's `LocalFile.SHA256`, giving a single authority for what landed and its known-good hash. This replaces `verify-models.sh`'s committed `checksums/<dir>.sha256` + `REPO_MAP`.
+
+**Remaining (offload):** `verify --baseline` for *unknown-source* models — ones not re-listable from a live HF repo (locally-built, or upstream removed). It would hash local files into the manifest as a self-consistency baseline. Deferred pending a concrete need, since registry models verify against the live listing.
 
 ### 14.7 Quant Reporting (P1 follow-on)
 

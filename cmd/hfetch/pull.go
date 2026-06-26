@@ -25,6 +25,7 @@ import (
 
 type pullFlags struct {
 	profile      string
+	dest         string
 	quant        string
 	output       string
 	streams      int
@@ -50,6 +51,7 @@ func pullCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&flags.profile, "profile", "gguf", "Fileset selector: gguf (pick one quant) or vllm (complete serve-ready set)")
+	cmd.Flags().StringVar(&flags.dest, "dest", "", `Destination preset. "vllm" = --profile vllm into a flat <data>/vllm/models/<name> dir`)
 	cmd.Flags().StringVar(&flags.quant, "quant", "", "Auto-select file by quantization type")
 	cmd.Flags().StringVar(&flags.output, "output", "", "Override download directory")
 	cmd.Flags().IntVar(&flags.streams, "streams", 0, "Parallel download streams (default: 4, or HFETCH_STREAMS)")
@@ -59,6 +61,24 @@ func pullCmd() *cobra.Command {
 	cmd.Flags().Bool("verify", true, "Re-verify SHA256 after download")
 	tokenFlag(cmd)
 	return cmd
+}
+
+// resolveDest expands the --dest preset into a (profile, output) pair. An empty
+// dest is a no-op. The only preset is "vllm": serve-ready profile into a flat
+// <data>/vllm/models/<name> directory that vLLM can mount directly. An explicit
+// --output is respected over the preset's default.
+func resolveDest(dest, profile, output, modelID, dataDir string) (string, string, error) {
+	if dest == "" {
+		return profile, output, nil
+	}
+	if dest != "vllm" {
+		return "", "", fmt.Errorf(`unknown --dest %q (only "vllm" is supported)`, dest)
+	}
+	profile = string(fileset.ProfileVLLM)
+	if output == "" {
+		output = filepath.Join(dataDir, "vllm", "models", filepath.Base(modelID))
+	}
+	return profile, output, nil
 }
 
 func resolveStreams(flagValue int) int {
@@ -74,6 +94,12 @@ func resolveStreams(flagValue int) int {
 }
 
 func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
+	// --dest is a destination preset that expands into profile + output.
+	var err error
+	if flags.profile, flags.output, err = resolveDest(flags.dest, flags.profile, flags.output, modelID, config.Dirs().Data); err != nil {
+		return err
+	}
+
 	switch flags.profile {
 	case string(fileset.ProfileGGUF), string(fileset.ProfileVLLM):
 	default:
@@ -92,10 +118,12 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 	// Build FileInfo for GGUF filtering.
 	var infos []gguf.FileInfo
 	fileSizeMap := make(map[string]int64)
+	fileHashMap := make(map[string]string) // remote path -> canonical LFS SHA256
 	for _, f := range files {
 		size := f.Size
 		if f.LFS != nil {
 			size = f.LFS.Size
+			fileHashMap[f.Filename] = f.LFS.OID
 		}
 		quant := gguf.ParseQuantFromFilename(f.Filename)
 		infos = append(infos, gguf.FileInfo{
@@ -313,6 +341,7 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		reg.AddFile(modelID, registry.LocalFile{
 			Filename:     localFile,
 			Size:         fileSizeMap[remoteFile],
+			SHA256:       fileHashMap[remoteFile], // canonical upstream hash (provenance)
 			Quantization: quant,
 			LocalPath:    finalPath,
 			Complete:     true,
