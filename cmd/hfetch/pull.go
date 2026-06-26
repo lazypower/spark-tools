@@ -18,11 +18,13 @@ import (
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/download"
+	"github.com/lazypower/spark-tools/pkg/hfetch/fileset"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 type pullFlags struct {
+	profile      string
 	quant        string
 	output       string
 	streams      int
@@ -47,6 +49,7 @@ func pullCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&flags.profile, "profile", "gguf", "Fileset selector: gguf (pick one quant) or vllm (complete serve-ready set)")
 	cmd.Flags().StringVar(&flags.quant, "quant", "", "Auto-select file by quantization type")
 	cmd.Flags().StringVar(&flags.output, "output", "", "Override download directory")
 	cmd.Flags().IntVar(&flags.streams, "streams", 0, "Parallel download streams (default: 4, or HFETCH_STREAMS)")
@@ -71,6 +74,12 @@ func resolveStreams(flagValue int) int {
 }
 
 func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
+	switch flags.profile {
+	case string(fileset.ProfileGGUF), string(fileset.ProfileVLLM):
+	default:
+		return fmt.Errorf("unknown --profile %q (want gguf or vllm)", flags.profile)
+	}
+
 	client := newAPIClient(cmd)
 	dirs := config.Dirs()
 
@@ -102,80 +111,92 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 	// selectedFiles holds the remote paths (may include subdir prefix).
 	var selectedFiles []string
 
-	switch {
-	case flags.filename != "":
-		selectedFiles = []string{flags.filename}
-	case flags.quant != "":
-		ggufFiles := gguf.FilterGGUF(infos)
-		matched := gguf.FilterByQuant(ggufFiles, flags.quant)
-		if len(matched) == 0 {
-			return fmt.Errorf("no file found for quantization %q", flags.quant)
+	// vLLM profile fetches the complete serve-ready set — no picker, no quant.
+	if flags.profile == string(fileset.ProfileVLLM) {
+		selected := fileset.SelectVLLM(files)
+		if len(selected) == 0 {
+			return fmt.Errorf("no vLLM-servable files found in %s (not a safetensors model?)", modelID)
 		}
-		for _, f := range matched {
+		for _, f := range selected {
 			selectedFiles = append(selectedFiles, f.Filename)
 		}
-	default:
-		// Interactive picker — group by quant so split shards appear as one option.
-		candidates := infos
-		if !flags.allFiles {
+	} else {
+		switch {
+		case flags.filename != "":
+			selectedFiles = []string{flags.filename}
+		case flags.quant != "":
 			ggufFiles := gguf.FilterGGUF(infos)
-			if len(ggufFiles) > 0 {
-				candidates = ggufFiles
+			matched := gguf.FilterByQuant(ggufFiles, flags.quant)
+			if len(matched) == 0 {
+				return fmt.Errorf("no file found for quantization %q", flags.quant)
 			}
-		}
-
-		if len(candidates) == 0 {
-			return fmt.Errorf("no GGUF files found in %s (use --all-files to show all)", modelID)
-		}
-
-		groups := gguf.GroupByQuant(candidates)
-
-		var options []huh.Option[string]
-		for _, g := range groups {
-			fit := gguf.EstimateFit(g.TotalSize, nil, 0)
-			fitLabel := ""
-			if fit.Status != gguf.FitUnknown {
-				fitLabel = "  " + fit.Label
+			for _, f := range matched {
+				selectedFiles = append(selectedFiles, f.Filename)
 			}
-			qualLabel := ""
-			if ql := gguf.QuantQualityLabel(g.Quantization); ql != "" {
-				qualLabel = "  " + ql
-			}
-			shardInfo := ""
-			if g.ShardCount > 1 {
-				shardInfo = fmt.Sprintf("  (%d files)", g.ShardCount)
-			}
-			label := fmt.Sprintf("%-12s %s%s%s%s", g.Quantization, formatSize(g.TotalSize), shardInfo, fitLabel, qualLabel)
-			if g.Quantization == "" {
-				label = fmt.Sprintf("%-12s %s%s", filepath.Base(g.Files[0].Filename), formatSize(g.TotalSize), shardInfo)
-			}
-			// Value is the quant name; we'll resolve to files after selection.
-			options = append(options, huh.NewOption(label, g.Quantization))
-		}
-
-		var selectedQuant string
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title(modelID).
-					Description("Select a quantization to download").
-					Options(options...).
-					Value(&selectedQuant),
-			),
-		)
-		if err := form.Run(); err != nil {
-			return err
-		}
-
-		// Resolve selected quant to all its files.
-		for _, g := range groups {
-			if g.Quantization == selectedQuant {
-				for _, f := range g.Files {
-					selectedFiles = append(selectedFiles, f.Filename)
+		default:
+			// Interactive picker — group by quant so split shards appear as one option.
+			candidates := infos
+			if !flags.allFiles {
+				ggufFiles := gguf.FilterGGUF(infos)
+				if len(ggufFiles) > 0 {
+					candidates = ggufFiles
 				}
-				break
+			}
+
+			if len(candidates) == 0 {
+				return fmt.Errorf("no GGUF files found in %s (use --all-files to show all)", modelID)
+			}
+
+			groups := gguf.GroupByQuant(candidates)
+
+			var options []huh.Option[string]
+			for _, g := range groups {
+				fit := gguf.EstimateFit(g.TotalSize, nil, 0)
+				fitLabel := ""
+				if fit.Status != gguf.FitUnknown {
+					fitLabel = "  " + fit.Label
+				}
+				qualLabel := ""
+				if ql := gguf.QuantQualityLabel(g.Quantization); ql != "" {
+					qualLabel = "  " + ql
+				}
+				shardInfo := ""
+				if g.ShardCount > 1 {
+					shardInfo = fmt.Sprintf("  (%d files)", g.ShardCount)
+				}
+				label := fmt.Sprintf("%-12s %s%s%s%s", g.Quantization, formatSize(g.TotalSize), shardInfo, fitLabel, qualLabel)
+				if g.Quantization == "" {
+					label = fmt.Sprintf("%-12s %s%s", filepath.Base(g.Files[0].Filename), formatSize(g.TotalSize), shardInfo)
+				}
+				// Value is the quant name; we'll resolve to files after selection.
+				options = append(options, huh.NewOption(label, g.Quantization))
+			}
+
+			var selectedQuant string
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title(modelID).
+						Description("Select a quantization to download").
+						Options(options...).
+						Value(&selectedQuant),
+				),
+			)
+			if err := form.Run(); err != nil {
+				return err
+			}
+
+			// Resolve selected quant to all its files.
+			for _, g := range groups {
+				if g.Quantization == selectedQuant {
+					for _, f := range g.Files {
+						selectedFiles = append(selectedFiles, f.Filename)
+					}
+					break
+				}
 			}
 		}
+
 	}
 
 	if len(selectedFiles) == 0 {
@@ -314,7 +335,64 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 			fmt.Printf("  Saved to: %s\n\n", outputDir)
 		}
 	}
+
+	// vLLM serve-ready pulls must pass the completeness gate (§14.4): a
+	// missing or corrupt required file is a hard, named, non-zero-exit
+	// failure — vLLM would otherwise silently serve a partial model.
+	if flags.profile == string(fileset.ProfileVLLM) {
+		if err := reportCompleteness(files, outputDir, flags.jsonOutput); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// reportCompleteness runs the completeness gate and surfaces the result.
+// Warnings are printed but non-fatal; any hard failure returns an error
+// (naming every offending file) so the process exits non-zero.
+func reportCompleteness(repoFiles []api.ModelFile, dir string, jsonOut bool) error {
+	rep, err := fileset.Verify(repoFiles, dir)
+	if err != nil {
+		return fmt.Errorf("completeness check: %w", err)
+	}
+
+	if jsonOut {
+		evt := map[string]any{
+			"phase":     "completeness",
+			"complete":  rep.Complete(),
+			"hard_fail": issueStrings(rep.HardFail),
+			"warnings":  issueStrings(rep.Warnings),
+		}
+		data, _ := json.Marshal(evt)
+		fmt.Println(string(data))
+		if !rep.Complete() {
+			return fmt.Errorf("model incomplete: %d required file(s) missing or corrupt", len(rep.HardFail))
+		}
+		return nil
+	}
+
+	for _, w := range rep.Warnings {
+		fmt.Printf("  ⚠ %s\n", w)
+	}
+	if !rep.Complete() {
+		fmt.Fprintln(os.Stderr, "\n  Incomplete model — required files missing or corrupt:")
+		for _, f := range rep.HardFail {
+			fmt.Fprintf(os.Stderr, "    ✗ %s\n", f)
+		}
+		fmt.Fprintln(os.Stderr, "  Refusing to treat this as serve-ready. Re-pull to fix.")
+		return fmt.Errorf("model incomplete: %d required file(s) missing or corrupt", len(rep.HardFail))
+	}
+	fmt.Printf("  ✓ Serve-ready: all required files present and verified\n\n")
+	return nil
+}
+
+func issueStrings(issues []fileset.Issue) []string {
+	out := make([]string, len(issues))
+	for i, is := range issues {
+		out[i] = is.String()
+	}
+	return out
 }
 
 // apiFileSource adapts the HF API client to the download.FileSource interface.
