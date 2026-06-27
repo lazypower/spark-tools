@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -32,6 +33,7 @@ func upCmd() *cobra.Command {
 		modelDir, name, served, image, accelerator, target, repoTree string
 		caps, mounts                                                 []string
 		ctx, port                                                    int
+		timeout                                                      time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "up",
@@ -82,6 +84,8 @@ func upCmd() *cobra.Command {
 			}
 
 			orch := llmserve.NewOrchestrator(stateDir, specDir)
+			orch.BootTimeout = timeout // 0 ⇒ the orchestrator's generous default
+			fmt.Fprintf(cmd.ErrOrStderr(), "bringing up %q (waiting for confirmed serving; large models cold-start in minutes, fail-fast on crash)...\n", name)
 			res, err := orch.Up(context.Background(), plan)
 			if err != nil {
 				return err
@@ -102,6 +106,7 @@ func upCmd() *cobra.Command {
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")
 	f.StringVar(&target, "target", "compose", "render target (B1: compose only)")
 	f.StringVar(&repoTree, "repo-tree", "", "saved hfetch tree listing (JSON) to run the completeness gate")
+	f.DurationVar(&timeout, "timeout", 0, "ceiling for reaching confirmed serving (0 = default 20m; a crashed container fails fast regardless)")
 	_ = cmd.MarkFlagRequired("model-dir")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("image")

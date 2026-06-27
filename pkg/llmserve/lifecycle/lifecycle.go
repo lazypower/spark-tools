@@ -43,7 +43,12 @@ type Orchestrator struct {
 
 func (o *Orchestrator) bootTimeout() time.Duration {
 	if o.BootTimeout <= 0 {
-		return 7 * time.Minute // boot is ~3–7 min on the Spark
+		// A generous backstop. With readiness-aware waiting (waitServing fails fast
+		// on a crashed container and stays patient while one is still loading), this
+		// only bounds a container that is running but never becomes healthy. Large
+		// MoE cold-starts on the Spark reach /health at ~8 min; this leaves margin
+		// for bigger models without killing a healthy slow load.
+		return 20 * time.Minute
 	}
 	return o.BootTimeout
 }
@@ -229,8 +234,13 @@ func (o *Orchestrator) gcSpec(old, current instance.Desired) {
 	}
 }
 
-// waitServing polls the serving predicate until it holds or the boot timeout
-// elapses, returning the last reconcile.
+// waitServing polls the serving predicate until it holds, the engine container
+// crashes, or the boot-timeout ceiling elapses. It is readiness-aware: a large
+// model can take many minutes to load, and a still-LOADING container (process
+// running, /health not yet 200) must not be killed at an arbitrary wall-clock —
+// so we only give up early when the engine container has EXITED (a real crash,
+// not a slow load) or the request is cancelled. The generous ceiling is the
+// backstop for a container that is running but wedged during load.
 func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reconciled {
 	deadline := time.Now().Add(o.bootTimeout())
 	for {
@@ -238,8 +248,16 @@ func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reco
 		if rec.serving() {
 			return rec
 		}
-		if time.Now().After(deadline) {
+		// A foreign stack will never become ours — don't wait it out.
+		if rec.Status == StatusConflict {
 			return rec
+		}
+		// Fail fast on a crash: the engine container exists but is not running.
+		if o.engineExited(ctx, d) {
+			return Reconciled{StatusNotServing, "engine container exited during startup (crash, not a slow load)"}
+		}
+		if time.Now().After(deadline) {
+			return Reconciled{StatusNotServing, fmt.Sprintf("not serving within the %s ceiling: %s", o.bootTimeout(), rec.Reason)}
 		}
 		select {
 		case <-ctx.Done():
@@ -247,6 +265,23 @@ func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reco
 		case <-time.After(o.pollInterval()):
 		}
 	}
+}
+
+// engineExited reports whether the engine container is present but NOT running —
+// a crash, distinct from a still-loading (running) container. Absent/unknown is
+// NOT treated as exited (a created container appears momentarily; let the ceiling
+// handle a genuinely-vanished stack rather than fail on an inspect race).
+func (o *Orchestrator) engineExited(ctx context.Context, d instance.Desired) bool {
+	state, err := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath)
+	if err != nil || !state.Exists {
+		return false
+	}
+	for _, svc := range state.Services {
+		if svc.Labels[composeServiceLabel] == "vllm" {
+			return !svc.Running
+		}
+	}
+	return false
 }
 
 // Down tears an instance down. Confirmed teardown removes the manifest; an

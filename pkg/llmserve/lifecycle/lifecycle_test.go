@@ -160,6 +160,38 @@ func TestUp_FailsToServe_UnconfirmedCleanup_KeepsHandle(t *testing.T) {
 	}
 }
 
+func TestUp_FailsFast_OnEngineCrash(t *testing.T) {
+	// Operator P1 follow-up: a crashed (exited) engine container must fail fast,
+	// NOT wait out the full boot ceiling. A long ceiling + a quick fake should
+	// still return promptly because engineExited short-circuits.
+	rt := newFakeRuntime()
+	o := newOrch(t, rt, fakeProber{health: false, warmup: false})
+	o.BootTimeout = time.Hour // a ceiling we must NOT wait out
+	d := desired("qwen", "hashA", "base")
+	// The engine container exists but has EXITED (Running=false) — a crash.
+	want := IdentityLabels(d)
+	crashed := maps.Clone(want)
+	crashed[composeServiceLabel] = "vllm"
+	rt.serveFor[o.specPath(d)] = runtime.RuntimeState{
+		Exists: true, Services: []runtime.ServiceState{{Name: "vllm", Running: false, Labels: crashed}},
+	}
+
+	done := make(chan struct{})
+	var rerr error
+	go func() {
+		_, rerr = o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("up must fail fast on a crashed engine, not wait the boot ceiling")
+	}
+	if rerr == nil {
+		t.Error("a crashed engine must fail the bring-up")
+	}
+}
+
 func TestUp_Idempotent_AlreadyServing(t *testing.T) {
 	rt := newFakeRuntime()
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
