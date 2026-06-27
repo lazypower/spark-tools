@@ -91,6 +91,16 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	if facts.ModelPath == "" {
 		return nil, &RejectionError{Rule: "request", Reason: "artifact has no resolved model path (resolve through hfetch first)"}
 	}
+	// The contract key is meaningless without the engine and hardware dimensions:
+	// they are what the staleness check compares a future emit against. An emit
+	// stamped with an empty fingerprint cannot be re-verified, so reject it here
+	// rather than emit an un-stampable contract.
+	if req.EngineDigest == "" {
+		return nil, &RejectionError{Rule: "request", Reason: "engine image digest is required to stamp the contract key"}
+	}
+	if req.HWFingerprint == "" {
+		return nil, &RejectionError{Rule: "request", Reason: "hardware fingerprint is required to stamp the contract key"}
+	}
 
 	// 1. Arch profile must exist — an unknown arch has no validated contract.
 	profile, ok := profiles.Lookup(facts.Arch)

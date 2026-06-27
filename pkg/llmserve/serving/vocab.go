@@ -111,6 +111,16 @@ type ArtifactFacts struct {
 // the artifact and the requested mode, crossed with the engine image digest and
 // the hardware fingerprint. Any change to a component can invalidate the
 // validated flags, which is what the staleness check (v1) and probes (v2) watch.
+//
+// It is the identity of the VALIDATION CONTRACT (which compatibility verdict
+// applies, and the anchor the staleness check compares against), NOT a unique
+// fingerprint of a launch invocation. It is intentionally coarse (design §3:
+// don't over-key unless a serving-relevant fact varies): runtime launch
+// parameters that do not change the compatibility verdict — context length,
+// dtype — are deliberately outside the key. Two launches that differ only in
+// context length share one contract because they share one compatibility
+// verdict. (When v2 needs per-instance identity for the liveness ledger, that is
+// an instance id layered on top of this key, not a widening of it — codex #13.)
 type ContractKey struct {
 	Arch          string          `json:"arch"`
 	Tokenizer     TokenizerFamily `json:"tokenizer"`

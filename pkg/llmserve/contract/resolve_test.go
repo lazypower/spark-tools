@@ -8,6 +8,17 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
+// req builds a Request with the engine/hw fingerprint dimensions filled in (both
+// required to stamp the contract key), so each test states only what it varies.
+func req(name string, caps ...serving.Capability) Request {
+	return Request{
+		ServedName:    name,
+		Capabilities:  caps,
+		EngineDigest:  "vllm/vllm-openai@v0.23.0",
+		HWFingerprint: "nvidia:gb10:sm121",
+	}
+}
+
 // qwenFacts is a verified Qwen3 MoE NVFP4 artifact with a Qwen tokenizer.
 func qwenFacts() serving.ArtifactFacts {
 	return serving.ArtifactFacts{
@@ -34,7 +45,7 @@ func flagValue(flags []string, name string) string {
 }
 
 func TestResolve_NVFP4_NoQuantFlag(t *testing.T) {
-	got, err := Resolve(Request{ServedName: "qwen-36b-fp4"}, qwenFacts())
+	got, err := Resolve(req("qwen-36b-fp4"), qwenFacts())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -47,7 +58,7 @@ func TestResolve_GPTQ_NeedsMoeWna16(t *testing.T) {
 	facts := qwenFacts()
 	facts.Quant = serving.QuantGPTQ
 	facts.ModelPath = "/models/hf/Qwen3.6-35B-A3B-GPTQ-Int4"
-	got, err := Resolve(Request{ServedName: "qwen-36b"}, facts)
+	got, err := Resolve(req("qwen-36b"), facts)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -59,7 +70,7 @@ func TestResolve_GPTQ_NeedsMoeWna16(t *testing.T) {
 func TestResolve_UnknownQuant_Rejected(t *testing.T) {
 	facts := qwenFacts()
 	facts.Quant = serving.QuantMethod("awq-future")
-	_, err := Resolve(Request{ServedName: "x"}, facts)
+	_, err := Resolve(req("x"), facts)
 	re, ok := AsRejection(err)
 	if !ok {
 		t.Fatalf("expected rejection for unknown quant, got %v", err)
@@ -72,17 +83,14 @@ func TestResolve_UnknownQuant_Rejected(t *testing.T) {
 func TestResolve_UnknownArch_Rejected(t *testing.T) {
 	facts := qwenFacts()
 	facts.Arch = "MysteryForCausalLM"
-	_, err := Resolve(Request{ServedName: "x"}, facts)
+	_, err := Resolve(req("x"), facts)
 	if re, ok := AsRejection(err); !ok || re.Rule != "unknown-arch" {
 		t.Fatalf("expected unknown-arch rejection, got %v", err)
 	}
 }
 
 func TestResolve_Thinking_EmitsReasoningParser(t *testing.T) {
-	got, err := Resolve(Request{
-		ServedName:   "qwen-36b-fp4",
-		Capabilities: []serving.Capability{serving.Thinking},
-	}, qwenFacts())
+	got, err := Resolve(req("qwen-36b-fp4", serving.Thinking), qwenFacts())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -98,10 +106,7 @@ func TestResolve_NoThinking_OmitsReasoningParser_KeepsGuidedLive(t *testing.T) {
 	// The AGENTS.md root-cause: a reasoning parser silently disables guided
 	// decoding. A coder request (guided-decoding, no thinking) must NOT carry a
 	// reasoning parser.
-	got, err := Resolve(Request{
-		ServedName:   "qwen-coder-30b",
-		Capabilities: []serving.Capability{serving.GuidedDecoding},
-	}, qwenFacts())
+	got, err := Resolve(req("qwen-coder-30b", serving.GuidedDecoding), qwenFacts())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -114,10 +119,7 @@ func TestResolve_NoThinking_OmitsReasoningParser_KeepsGuidedLive(t *testing.T) {
 }
 
 func TestResolve_Reject_ThinkingPlusGuided(t *testing.T) {
-	_, err := Resolve(Request{
-		ServedName:   "qwen-36b-fp4",
-		Capabilities: []serving.Capability{serving.Thinking, serving.GuidedDecoding},
-	}, qwenFacts())
+	_, err := Resolve(req("qwen-36b-fp4", serving.Thinking, serving.GuidedDecoding), qwenFacts())
 	re, ok := AsRejection(err)
 	if !ok {
 		t.Fatalf("expected rejection for thinking+guided, got %v", err)
@@ -128,10 +130,7 @@ func TestResolve_Reject_ThinkingPlusGuided(t *testing.T) {
 }
 
 func TestResolve_ToolCalling_Qwen_EmitsParser(t *testing.T) {
-	got, err := Resolve(Request{
-		ServedName:   "qwen-coder-30b",
-		Capabilities: []serving.Capability{serving.ToolCalling},
-	}, qwenFacts())
+	got, err := Resolve(req("qwen-coder-30b", serving.ToolCalling), qwenFacts())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -148,10 +147,7 @@ func TestResolve_Reject_ToolCalling_NonQwenTokenizer(t *testing.T) {
 	// tokenizer artifact must be rejected.
 	facts := qwenFacts()
 	facts.Tokenizer = serving.TokenizerGeneric
-	_, err := Resolve(Request{
-		ServedName:   "x",
-		Capabilities: []serving.Capability{serving.ToolCalling},
-	}, facts)
+	_, err := Resolve(req("x", serving.ToolCalling), facts)
 	re, ok := AsRejection(err)
 	if !ok {
 		t.Fatalf("expected rejection for tool-calling on non-Qwen tokenizer, got %v", err)
@@ -170,16 +166,39 @@ func TestResolve_Reject_MistralTokenizerMode_Vision(t *testing.T) {
 		Quant:     serving.QuantNone,
 		HasVision: true,
 	}
-	_, err := Resolve(Request{
-		ServedName:   "mistral3",
-		Capabilities: []serving.Capability{serving.Vision},
-	}, facts)
+	_, err := Resolve(req("mistral3", serving.Vision), facts)
 	re, ok := AsRejection(err)
 	if !ok {
 		t.Fatalf("expected rejection for mistral tokenizer-mode + vision, got %v", err)
 	}
 	if re.Rule != "mistral-tokenizer-mode-breaks-vision" {
 		t.Errorf("wrong rule fired: %q", re.Rule)
+	}
+}
+
+func TestResolve_Reject_VisionWithoutProcessor(t *testing.T) {
+	// codex P1: the profile claims the arch can do vision, but a text-only build
+	// of that arch ships no processor. Requesting vision must reject, not silently
+	// emit a text server the caller believes is multimodal.
+	facts := qwenFacts() // Qwen3 MoE claims vision, but this artifact HasVision=false
+	if facts.HasVision {
+		t.Fatal("test precondition: facts must be a text-only artifact")
+	}
+	_, err := Resolve(req("qwen", serving.Vision), facts)
+	re, ok := AsRejection(err)
+	if !ok {
+		t.Fatalf("expected rejection for vision on a text-only artifact, got %v", err)
+	}
+	if re.Rule != "vision-requires-processor" {
+		t.Errorf("wrong rule fired: %q", re.Rule)
+	}
+}
+
+func TestResolve_Vision_WithProcessor_Allowed(t *testing.T) {
+	facts := qwenFacts()
+	facts.HasVision = true
+	if _, err := Resolve(req("qwen-vl", serving.Vision), facts); err != nil {
+		t.Errorf("vision on a multimodal artifact must resolve, got %v", err)
 	}
 }
 
@@ -192,7 +211,7 @@ func TestResolve_Nemotron_TrustRemoteCode(t *testing.T) {
 		Quant:           serving.QuantNVFP4,
 		NeedsRemoteCode: true,
 	}
-	got, err := Resolve(Request{ServedName: "nemotron-nano"}, facts)
+	got, err := Resolve(req("nemotron-nano"), facts)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -210,27 +229,20 @@ func TestResolve_Reject_UnsupportedCapability(t *testing.T) {
 		Tokenizer: serving.TokenizerGeneric,
 		Quant:     serving.QuantNVFP4,
 	}
-	_, err := Resolve(Request{
-		ServedName:   "glm-47-flash",
-		Capabilities: []serving.Capability{serving.Thinking},
-	}, facts)
+	_, err := Resolve(req("glm-47-flash", serving.Thinking), facts)
 	if re, ok := AsRejection(err); !ok || re.Rule != "unsupported-capability" {
 		t.Fatalf("expected unsupported-capability rejection, got %v", err)
 	}
 }
 
 func TestResolve_ContractKey_ModeIsOrderIndependent(t *testing.T) {
-	a, err := Resolve(Request{
-		ServedName:   "qwen",
-		Capabilities: []serving.Capability{serving.Vision, serving.ToolCalling},
-	}, qwenFacts())
+	facts := qwenFacts()
+	facts.HasVision = true
+	a, err := Resolve(req("qwen", serving.Vision, serving.ToolCalling), facts)
 	if err != nil {
 		t.Fatalf("resolve a: %v", err)
 	}
-	b, err := Resolve(Request{
-		ServedName:   "qwen",
-		Capabilities: []serving.Capability{serving.ToolCalling, serving.Vision},
-	}, qwenFacts())
+	b, err := Resolve(req("qwen", serving.ToolCalling, serving.Vision), facts)
 	if err != nil {
 		t.Fatalf("resolve b: %v", err)
 	}
@@ -240,12 +252,23 @@ func TestResolve_ContractKey_ModeIsOrderIndependent(t *testing.T) {
 }
 
 func TestResolve_RequiresServedNameAndPath(t *testing.T) {
-	if _, err := Resolve(Request{}, qwenFacts()); err == nil {
+	if _, err := Resolve(Request{EngineDigest: "e", HWFingerprint: "h"}, qwenFacts()); err == nil {
 		t.Error("empty served name must be rejected")
 	}
 	facts := qwenFacts()
 	facts.ModelPath = ""
-	if _, err := Resolve(Request{ServedName: "x"}, facts); err == nil {
+	if _, err := Resolve(req("x"), facts); err == nil {
 		t.Error("missing model path must be rejected")
+	}
+}
+
+func TestResolve_RequiresEngineAndHWFingerprint(t *testing.T) {
+	// codex P1: a contract key with empty engine/hw dimensions cannot be
+	// staleness-checked, so the engine must refuse to stamp one.
+	if _, err := Resolve(Request{ServedName: "x", HWFingerprint: "h"}, qwenFacts()); err == nil {
+		t.Error("missing engine digest must be rejected")
+	}
+	if _, err := Resolve(Request{ServedName: "x", EngineDigest: "e"}, qwenFacts()); err == nil {
+		t.Error("missing hardware fingerprint must be rejected")
 	}
 }

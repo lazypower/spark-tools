@@ -33,10 +33,28 @@ type CompatRule struct {
 	Remedy string
 }
 
-// CompatRules is the v1 negative-compatibility rule set — the three production
-// failure classes the campaign learned the hard way. They are checked at
-// resolution; any violation rejects the request (no partial/footgun launch).
+// CompatRules is the v1 request-validation rule set, evaluated at resolution;
+// any violation rejects the request (no partial/footgun launch). It holds the
+// three production failure classes the campaign learned the hard way plus the
+// capability-requires-fact gate: a profile claim says an ARCH can do X, but
+// whether THIS ARTIFACT can is an artifact fact, and requesting a capability the
+// artifact can't actually serve must reject, not silently emit a server that
+// lacks it.
 var CompatRules = []CompatRule{
+	// Vision requires a multimodal processor in the artifact. The arch profile may
+	// claim vision (the arch supports it), but a text-only build of that arch ships
+	// no processor — vLLM would then serve text while the caller believes it
+	// requested vision. Reject rather than silently mis-serve.
+	{
+		Name: "vision-requires-processor",
+		Violated: func(r CompatRequest) (bool, string) {
+			if r.wants(serving.Vision) && !r.Facts.HasVision {
+				return true, "vision was requested but the artifact ships no multimodal processor (a text-only build of this arch)"
+			}
+			return false, ""
+		},
+		Remedy: "serve a vision build of this model, or drop the vision capability",
+	},
 	// reasoning_parser ⊗ guided_decoding. A reasoning parser makes vLLM defer the
 	// grammar to post-</think> content; guided decoding then never activates (a
 	// silent no-op). Requesting both reliable structured output AND thinking in
