@@ -25,6 +25,10 @@ type ServiceState struct {
 	RestartCount int
 	// Labels are the container's labels (the identity stamp emit applied).
 	Labels map[string]string
+	// Mounts are the container's bind-mount HOST sources. B2 liveness reads these
+	// to protect artifacts used by FOREIGN (non-llm-serve) containers — run.sh,
+	// Ollama, hand-launched — which carry no llm-serve labels.
+	Mounts []string
 }
 
 // RuntimeState is the observed state of a managed project's stack. Exists is true
@@ -49,10 +53,11 @@ type Runtime interface {
 	Down(ctx context.Context, projectName, specPath string) error
 	// Inspect reports the actual runtime state of the project's stack.
 	Inspect(ctx context.Context, projectName, specPath string) (RuntimeState, error)
-	// ListManaged reports every llm-serve-managed container on the host, across
-	// all projects, with its labels. It is what B2's liveness query reads to find
-	// which artifacts are in use — independent of any single instance's spec.
-	ListManaged(ctx context.Context) ([]ServiceState, error)
+	// ListRunning reports every RUNNING container on the host (not just
+	// llm-serve-managed), with its labels and bind-mount sources. B2's liveness
+	// query reads this so eviction protection is REALITY-based: a model served by
+	// a foreign container (run.sh, Ollama, hand-launched) is still protected.
+	ListRunning(ctx context.Context) ([]ServiceState, error)
 }
 
 // Prober checks a running endpoint. Both checks are part of the serving predicate;

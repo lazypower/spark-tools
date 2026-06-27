@@ -85,14 +85,12 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 	return RuntimeState{Exists: true, Services: services}, nil
 }
 
-// ListManaged returns every llm-serve-managed container on the host (all
-// projects) with its labels — B2's liveness query reads this to find which
-// artifacts are in use.
-func (c *Compose) ListManaged(ctx context.Context) ([]ServiceState, error) {
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq",
-		"--filter", "label="+managedByLabel).Output()
+// ListRunning returns every RUNNING container on the host (not just managed) with
+// its labels and bind-mount sources — B2's reality-based liveness query.
+func (c *Compose) ListRunning(ctx context.Context) ([]ServiceState, error) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q").Output() // running only
 	if err != nil {
-		return nil, fmt.Errorf("docker ps (managed): %w", err)
+		return nil, fmt.Errorf("docker ps (running): %w", err)
 	}
 	ids := strings.Fields(strings.TrimSpace(string(out)))
 	if len(ids) == 0 {
@@ -136,15 +134,26 @@ func inspectContainers(ctx context.Context, ids []string) ([]ServiceState, error
 			Config struct {
 				Labels map[string]string `json:"Labels"`
 			} `json:"Config"`
+			Mounts []struct {
+				Type   string `json:"Type"`
+				Source string `json:"Source"`
+			} `json:"Mounts"`
 		}
 		if err := json.Unmarshal([]byte(line), &ins); err != nil {
 			return nil, fmt.Errorf("parsing docker inspect: %w", err)
+		}
+		var mounts []string
+		for _, m := range ins.Mounts {
+			if m.Type == "bind" && m.Source != "" {
+				mounts = append(mounts, m.Source)
+			}
 		}
 		services = append(services, ServiceState{
 			Name:         strings.TrimPrefix(ins.Name, "/"),
 			Running:      ins.State.Running,
 			RestartCount: ins.RestartCount,
 			Labels:       ins.Config.Labels,
+			Mounts:       mounts,
 		})
 	}
 	return services, nil

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
@@ -92,41 +93,59 @@ func (l *Liveness) Protected(ctx context.Context) Report {
 		if dir == "" {
 			continue
 		}
-		key, ok := canonicalize(dir)
-		if !ok {
-			// Cannot resolve a recorded artifact path → cannot compare it safely to
-			// a consumer's candidate → fail closed.
-			return Report{AllProtected: true,
-				Reason: "desired manifest model dir does not resolve (" + dir + "); cannot compare safely"}
+		if !l.addRoot(&r, dir) {
+			return r // unresolvable recorded path → fail closed
 		}
-		r.Protected[key] = true
 	}
 
-	// Live half: every running managed container protects the artifact it serves,
-	// read from its self-reported host-path label (NOT the --model container path).
-	containers, err := l.Runtime.ListManaged(ctx)
+	// Live half: REALITY-based. Every RUNNING container protects what it uses:
+	//   - a MANAGED (llm-serve) container protects its PRECISE artifact (the
+	//     host-path label), so B3 can still prune OTHER unused models on this host.
+	//   - a FOREIGN container (run.sh, Ollama, hand-launched — no llm-serve labels)
+	//     protects every host dir it BIND-MOUNTS, since we can't know which subdir
+	//     it serves. Broad but safe (the coexistence guard).
+	containers, err := l.Runtime.ListRunning(ctx)
 	if err != nil {
 		return Report{AllProtected: true, Reason: "runtime unreachable: " + err.Error()}
 	}
 	for _, c := range containers {
 		if !c.Running {
+			continue // ListRunning should pre-filter, but never protect on a dead container
+		}
+		if c.Labels[lifecycle.LabelManagedBy] == lifecycle.ManagedByValue {
+			host := c.Labels[lifecycle.LabelArtifactHostPath]
+			if host == "" {
+				return Report{AllProtected: true,
+					Reason: "a running managed container has no " + lifecycle.LabelArtifactHostPath + " label; cannot determine its artifact"}
+			}
+			if !l.addRoot(&r, host) {
+				return r
+			}
 			continue
 		}
-		host := c.Labels[lifecycle.LabelArtifactHostPath]
-		if host == "" {
-			// A running managed container we cannot map to an artifact — we cannot
-			// rule out that it serves the candidate, so nothing is safely evictable.
-			return Report{AllProtected: true,
-				Reason: "a running managed container has no " + lifecycle.LabelArtifactHostPath + " label; cannot determine its artifact"}
+		// Foreign container: protect each bind-mount source.
+		for _, src := range c.Mounts {
+			if !l.addRoot(&r, src) {
+				return r
+			}
 		}
-		key, ok := canonicalize(host)
-		if !ok {
-			return Report{AllProtected: true,
-				Reason: "a running managed container's artifact path does not resolve (" + host + ")"}
-		}
-		r.Protected[key] = true
 	}
 	return r
+}
+
+// addRoot canonicalizes a protected host path into the report; an unresolvable
+// path makes the report fail-closed (AllProtected) and returns false.
+func (l *Liveness) addRoot(r *Report, path string) bool {
+	key, ok := canonicalize(path)
+	if !ok {
+		*r = Report{AllProtected: true, Reason: "a protected artifact path does not resolve (" + path + ")"}
+		return false
+	}
+	if r.Protected == nil {
+		r.Protected = map[string]bool{}
+	}
+	r.Protected[key] = true
+	return true
 }
 
 // IsProtected reports whether a host artifact path must not be evicted. It is the
@@ -142,7 +161,31 @@ func (l *Liveness) IsProtected(ctx context.Context, artifactPath string) bool {
 	if artifactPath == "" || !ok {
 		return true // can't evaluate the candidate → protect (fail closed)
 	}
-	return r.Protected[key]
+	// Protected if the candidate OVERLAPS any protected root: deleting it would
+	// affect a protected path, or a protected path lives under it. Exact match,
+	// candidate-under-root (artifact inside a foreign mount), and root-under-
+	// candidate (evicting a parent of a served artifact) all count.
+	for root := range r.Protected {
+		if pathsOverlap(key, root) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathsOverlap reports whether two canonical paths are equal or one is an
+// ancestor of the other.
+func pathsOverlap(a, b string) bool {
+	return a == b || isUnder(a, b) || isUnder(b, a)
+}
+
+// isUnder reports whether p is a strict descendant of ancestor.
+func isUnder(p, ancestor string) bool {
+	rel, err := filepath.Rel(ancestor, p)
+	if err != nil || rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // ProtectedArtifacts returns the sorted canonical keys of protected artifacts, and
@@ -189,14 +232,14 @@ func (l *Liveness) Instance(ctx context.Context, name string) (InstanceLiveness,
 	// — otherwise the per-instance verdict could contradict the authority.
 	report := l.Protected(ctx)
 
-	containers, err := l.Runtime.ListManaged(ctx)
+	containers, err := l.Runtime.ListRunning(ctx)
 	if err != nil {
 		out.Protected = true // fail-closed
 		out.Reason = "runtime unreachable: " + err.Error()
 		return out, nil
 	}
 	for _, c := range containers {
-		if c.Running && c.Labels[lifecycle.LabelInstance] == name {
+		if c.Labels[lifecycle.LabelManagedBy] == lifecycle.ManagedByValue && c.Labels[lifecycle.LabelInstance] == name {
 			out.Running = true
 			break
 		}

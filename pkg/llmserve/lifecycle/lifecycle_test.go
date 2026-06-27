@@ -57,7 +57,7 @@ func (f *fakeRuntime) Inspect(_ context.Context, _, _ string) (runtime.RuntimeSt
 	return f.serveFor[f.active], nil
 }
 
-func (f *fakeRuntime) ListManaged(context.Context) ([]runtime.ServiceState, error) {
+func (f *fakeRuntime) ListRunning(context.Context) ([]runtime.ServiceState, error) {
 	if f.inspErr != nil {
 		return nil, f.inspErr
 	}

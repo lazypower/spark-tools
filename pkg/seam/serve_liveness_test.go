@@ -31,7 +31,7 @@ func (s *seamRuntime) Down(context.Context, string, string) error { return nil }
 func (s *seamRuntime) Inspect(context.Context, string, string) (runtime.RuntimeState, error) {
 	return runtime.RuntimeState{}, nil
 }
-func (s *seamRuntime) ListManaged(context.Context) ([]runtime.ServiceState, error) {
+func (s *seamRuntime) ListRunning(context.Context) ([]runtime.ServiceState, error) {
 	return s.managed, nil
 }
 

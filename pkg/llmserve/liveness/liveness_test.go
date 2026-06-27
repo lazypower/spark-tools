@@ -12,9 +12,9 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
 
-// fakeRuntime only needs ListManaged for B2.
+// fakeRuntime serves a fixed set of running containers to ListRunning.
 type fakeRuntime struct {
-	managed []runtime.ServiceState
+	managed []runtime.ServiceState // misnomer kept for diff size: the running set
 	listErr error
 }
 
@@ -23,8 +23,14 @@ func (f *fakeRuntime) Down(context.Context, string, string) error { return nil }
 func (f *fakeRuntime) Inspect(context.Context, string, string) (runtime.RuntimeState, error) {
 	return runtime.RuntimeState{}, nil
 }
-func (f *fakeRuntime) ListManaged(context.Context) ([]runtime.ServiceState, error) {
+func (f *fakeRuntime) ListRunning(context.Context) ([]runtime.ServiceState, error) {
 	return f.managed, f.listErr
+}
+
+// foreignContainer is a NON-llm-serve container (run.sh/Ollama/hand-launched):
+// protected by its bind mounts, since we can't know which subdir it serves.
+func foreignContainer(name string, mounts ...string) runtime.ServiceState {
+	return runtime.ServiceState{Name: name, Running: true, Mounts: mounts}
 }
 
 // modelDir creates a real artifact directory (canonicalization resolves real
@@ -115,6 +121,66 @@ func TestFailClosed_UnresolvableRecordedPath(t *testing.T) {
 	}
 	if _, all := l.ProtectedArtifacts(context.Background()); !all {
 		t.Error("an unresolvable recorded path must yield allProtected")
+	}
+}
+
+func TestProtected_ForeignContainerMount_CoexistenceGuard(t *testing.T) {
+	// The run.sh case: a foreign container bind-mounts the whole models dir. Every
+	// artifact UNDER that mount is protected (broad but safe), so B3 won't prune a
+	// live run.sh-served model.
+	models := t.TempDir()
+	served := filepath.Join(models, "Coder")
+	if err := os.MkdirAll(served, 0755); err != nil {
+		t.Fatal(err)
+	}
+	l := New(storeWith(t, nil), &fakeRuntime{managed: []runtime.ServiceState{
+		foreignContainer("vllm-runsh", models), // mounts the parent
+	}})
+	if !l.IsProtected(context.Background(), served) {
+		t.Error("an artifact under a foreign container's mount must be protected (coexistence)")
+	}
+	if !l.IsProtected(context.Background(), models) {
+		t.Error("the mounted dir itself must be protected")
+	}
+}
+
+func TestProtected_ManagedIsPrecise_B3CanStillPrune(t *testing.T) {
+	// A MANAGED instance mounts the whole models dir but protects only its PRECISE
+	// artifact — so B3 can prune OTHER unused models post-migration.
+	models := t.TempDir()
+	served := filepath.Join(models, "Served")
+	unused := filepath.Join(models, "Unused")
+	for _, d := range []string{served, unused} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := New(storeWith(t, nil), &fakeRuntime{managed: []runtime.ServiceState{
+		runningContainer("served", served), // managed: precise host-path label
+	}})
+	if !l.IsProtected(context.Background(), served) {
+		t.Error("the managed instance's artifact must be protected")
+	}
+	if l.IsProtected(context.Background(), unused) {
+		t.Error("an UNUSED model under the same mount must be prunable (managed protection is precise)")
+	}
+}
+
+func TestProtected_OverlapBothDirections(t *testing.T) {
+	models := t.TempDir()
+	served := filepath.Join(models, "Coder")
+	if err := os.MkdirAll(served, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Manifest protects the precise artifact dir.
+	l := New(storeWith(t, map[string]string{"coder": served}), &fakeRuntime{})
+	// Evicting the parent of a protected artifact must be refused (root under candidate).
+	if !l.IsProtected(context.Background(), models) {
+		t.Error("evicting a parent dir of a protected artifact must be refused")
+	}
+	// Evicting a subdir of the protected artifact must be refused (candidate under root).
+	if !l.IsProtected(context.Background(), filepath.Join(served, "shard0")) {
+		t.Error("evicting a subpath of a protected artifact must be refused")
 	}
 }
 
