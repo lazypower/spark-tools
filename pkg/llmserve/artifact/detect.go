@@ -134,19 +134,31 @@ func tokenizerClass(dir string) string {
 // detectQuant maps hfetch's quant detection onto the serving quant vocabulary,
 // so the QuantFlags authority sees a known method. Reusing pkg/hfetch/quant
 // keeps quant interpretation in one place across the toolchain.
+//
+// CRITICAL: quant metadata that is PRESENT but unrecognized must NOT collapse to
+// a known-safe method (QuantNone / QuantNVFP4) — that would slip past the
+// resolver's unknown-quant gate and emit a launch with no/wrong quant flag. An
+// unrecognized method/algo is surfaced as a distinct, non-empty QuantMethod that
+// is absent from QuantFlags, so contract.Resolve rejects it. Only a genuine
+// absence of quant metadata (info == nil) is QuantNone.
 func detectQuant(dir string, configJSON []byte) serving.QuantMethod {
 	hfQuant, _ := os.ReadFile(filepath.Join(dir, "hf_quant_config.json"))
 	gptq, _ := os.ReadFile(filepath.Join(dir, "quantize_config.json"))
 	info := quant.Parse(configJSON, hfQuant, gptq)
 	if info == nil {
-		return serving.QuantNone
+		return serving.QuantNone // no quant metadata at all — unquantized
 	}
 	switch strings.ToLower(info.Method) {
 	case "modelopt":
-		if strings.EqualFold(info.Algo, "FP8") {
+		switch strings.ToUpper(info.Algo) {
+		case "NVFP4":
+			return serving.QuantNVFP4
+		case "FP8":
 			return serving.QuantFP8
+		default:
+			// ModelOpt with an algo we have not validated a flag policy for.
+			return unknownQuant("modelopt", info.Algo)
 		}
-		return serving.QuantNVFP4 // ModelOpt NVFP4 is the DGX Spark case
 	case "gptq":
 		return serving.QuantGPTQ
 	case "compressed-tensors":
@@ -154,8 +166,24 @@ func detectQuant(dir string, configJSON []byte) serving.QuantMethod {
 	case "fp8":
 		return serving.QuantFP8
 	default:
-		return serving.QuantNone
+		// A quant method present in the artifact that llm-serve does not know how
+		// to serve (e.g. AWQ, a future family) — surface it so the resolver rejects.
+		return unknownQuant(info.Method, info.Algo)
 	}
+}
+
+// unknownQuant builds a non-empty, deliberately-unmapped QuantMethod label from
+// detected metadata, so the resolver's unknown-quant gate rejects it with a
+// legible name instead of silently emitting an un-flagged launch.
+func unknownQuant(method, algo string) serving.QuantMethod {
+	label := strings.ToLower(method)
+	if algo != "" {
+		label += "/" + strings.ToLower(algo)
+	}
+	if label == "" {
+		label = "unknown"
+	}
+	return serving.QuantMethod(label)
 }
 
 // hasVisionProcessor reports whether the artifact ships a multimodal processor —

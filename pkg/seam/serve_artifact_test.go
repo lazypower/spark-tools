@@ -100,3 +100,39 @@ func TestSeam_ServeAcceptsCompleteArtifact_AndResolves(t *testing.T) {
 		t.Errorf("contract key arch = %q", got.Key.Arch)
 	}
 }
+
+// CONTRACT: a complete artifact whose quant family llm-serve cannot serve must
+// be REJECTED at resolution, not emitted with no/wrong quant flag. The detector
+// surfaces the unknown quant, the resolver's unknown-quant gate fires. Guards
+// the codex-r2 P1: detection must not downgrade an unrecognized quant to a
+// known-safe one and slip past the gate.
+func TestSeam_ServeRejectsUnservableQuant(t *testing.T) {
+	// A complete artifact whose embedded quant is AWQ — built from scratch so the
+	// completeness gate passes (repo tree matches disk) and only the quant gate
+	// can reject.
+	dir := t.TempDir()
+	awqConfig := `{"architectures":["Qwen3MoeForCausalLM"],"model_type":"qwen3_moe","quantization_config":{"quant_method":"awq","bits":4}}`
+	repo := []api.ModelFile{
+		lfsShard(t, dir, "model.safetensors", "WEIGHTS"),
+		plainFile(t, dir, "config.json", awqConfig),
+		plainFile(t, dir, "tokenizer_config.json", `{"tokenizer_class":"Qwen2Tokenizer","chat_template":"x"}`),
+		plainFile(t, dir, "tokenizer.json", `{}`),
+		plainFile(t, dir, "generation_config.json", `{}`),
+	}
+
+	facts, err := artifact.Verify(repo, dir)
+	if err != nil {
+		t.Fatalf("artifact is complete; the gate should pass, got: %v", err)
+	}
+	_, err = contract.Resolve(contract.Request{
+		ServedName: "qwen-awq",
+		Target:     fingerprint.Fingerprint{Engine: "vllm/vllm-openai@v0.23.0", Accelerator: "nvidia:gb10:sm121"},
+	}, facts)
+	re, ok := contract.AsRejection(err)
+	if !ok {
+		t.Fatalf("an unservable quant must be rejected, not emitted; got %v", err)
+	}
+	if re.Rule != "unknown-quant" {
+		t.Errorf("expected unknown-quant rejection, got %q", re.Rule)
+	}
+}

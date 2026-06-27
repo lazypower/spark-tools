@@ -86,3 +86,51 @@ func TestDetectFacts_NoConfig_Errors(t *testing.T) {
 		t.Error("a directory with no config.json must error")
 	}
 }
+
+func TestDetectFacts_NoQuantMetadata_IsNone(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "config.json", `{"architectures":["Qwen3MoeForCausalLM"]}`)
+	facts, err := DetectFacts(dir)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if facts.Quant != serving.QuantNone {
+		t.Errorf("absent quant metadata must be QuantNone, got %q", facts.Quant)
+	}
+}
+
+func TestDetectFacts_UnknownQuant_NotDowngraded(t *testing.T) {
+	// codex P1: present-but-unrecognized quant metadata must NOT collapse to a
+	// known-safe method, or it slips past the resolver's unknown-quant gate.
+	cases := []struct {
+		name        string
+		quantConfig string // contents of config.json quantization_config or sidecar
+		viaSidecar  bool
+	}{
+		{"embedded-awq", `{"architectures":["Qwen3MoeForCausalLM"],"quantization_config":{"quant_method":"awq","bits":4}}`, false},
+		{"modelopt-int8", `{"quantization":{"quant_algo":"INT8"}}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if c.viaSidecar {
+				writeFile(t, dir, "config.json", `{"architectures":["Qwen3MoeForCausalLM"]}`)
+				writeFile(t, dir, "hf_quant_config.json", c.quantConfig)
+			} else {
+				writeFile(t, dir, "config.json", c.quantConfig)
+			}
+			facts, err := DetectFacts(dir)
+			if err != nil {
+				t.Fatalf("detect: %v", err)
+			}
+			switch facts.Quant {
+			case serving.QuantNone, serving.QuantNVFP4, serving.QuantFP8,
+				serving.QuantGPTQ, serving.QuantCompressedTensors:
+				t.Errorf("unrecognized quant must surface as an unknown method, got known %q", facts.Quant)
+			}
+			if facts.Quant == "" {
+				t.Error("unrecognized quant must be a non-empty unknown label, not empty (QuantNone)")
+			}
+		})
+	}
+}
