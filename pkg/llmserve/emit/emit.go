@@ -35,6 +35,29 @@ type Host struct {
 	Volumes []Mount
 	// ServiceName is the compose/quadlet service name. Defaults to "vllm".
 	ServiceName string
+	// Labels are immutable identity labels stamped on every emitted service, so a
+	// lifecycle reconcile can prove the running stack IS a specific managed
+	// instance (B1). Rendered in sorted key order so the emitted spec — and thus
+	// its content hash — is deterministic.
+	Labels map[string]string
+}
+
+// sortedLabels returns the host labels as ordered key=value pairs (sorted by key)
+// so emit output is deterministic regardless of map iteration order.
+func (h Host) sortedLabels() []string {
+	if len(h.Labels) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(h.Labels))
+	for k := range h.Labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = k + "=" + h.Labels[k]
+	}
+	return out
 }
 
 // Mount is a read-only host→container bind for model weights.
@@ -164,6 +187,9 @@ func DockerRun(r *contract.Resolved, h Host) string {
 	for _, m := range h.Volumes {
 		fmt.Fprintf(&b, "  -v %s:%s:ro \\\n", m.Host, m.Container)
 	}
+	for _, l := range h.sortedLabels() {
+		fmt.Fprintf(&b, "  --label %s \\\n", quoteArg(l))
+	}
 	fmt.Fprintf(&b, "  %s \\\n", h.Image)
 	for i, f := range flags {
 		cont := " \\"
@@ -199,6 +225,12 @@ func Compose(r *contract.Resolved, h Host) string {
 			fmt.Fprintf(&b, "      - %s:%s:ro\n", m.Host, m.Container)
 		}
 	}
+	if labels := h.sortedLabels(); len(labels) > 0 {
+		b.WriteString("    labels:\n")
+		for _, l := range labels {
+			fmt.Fprintf(&b, "      - %s\n", yamlScalar(l))
+		}
+	}
 	b.WriteString("    command:\n")
 	for _, f := range flags {
 		fmt.Fprintf(&b, "      - %s\n", yamlScalar(f))
@@ -219,6 +251,9 @@ func Quadlet(r *contract.Resolved, h Host) string {
 	b.WriteString("PodmanArgs=--ipc host --gpus all\n")
 	for _, m := range h.Volumes {
 		fmt.Fprintf(&b, "Volume=%s:%s:ro\n", m.Host, m.Container)
+	}
+	for _, l := range h.sortedLabels() {
+		fmt.Fprintf(&b, "Label=%s\n", l)
 	}
 	// Quadlet Exec is a single line carrying the full vLLM command.
 	fmt.Fprintf(&b, "Exec=%s\n", quoteArgs(flags))

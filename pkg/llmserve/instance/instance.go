@@ -46,6 +46,10 @@ type Desired struct {
 	// ProjectName is the compose/quadlet project name, derived deterministically
 	// from Name.
 	ProjectName string `json:"project_name"`
+	// Endpoint is the base URL the instance serves on (e.g. http://localhost:8000),
+	// where the serving predicate's health + warmup checks are sent. Not an
+	// identity label (two instances can't share a port).
+	Endpoint string `json:"endpoint"`
 }
 
 // Phase is the in-flight operation a manifest is mid-way through. Only
