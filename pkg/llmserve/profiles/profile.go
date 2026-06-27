@@ -10,7 +10,10 @@
 // `asserted` against the fingerprint it was authored on.
 package profiles
 
-import "github.com/lazypower/spark-tools/pkg/llmserve/serving"
+import (
+	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
+	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+)
 
 // ClaimStatus is the lifecycle of a capability claim (§8.0). Status is never
 // hand-asserted beyond the initial `asserted`; the probe subsystem (v2) promotes
@@ -28,14 +31,17 @@ const (
 )
 
 // Claim is a hand-seeded hypothesis that an arch supports a capability, carrying
-// provenance and the fingerprint it was authored against (§8.0). The verdict
-// (Status) starts `asserted` and is only ever changed by probes, never by hand.
+// its human provenance (§8.0). The verdict (Status) starts `asserted` and is
+// only ever changed by probes, never by hand. The environment a claim is
+// trusted against is the profile's AuthoredAgainst fingerprint — in v1 every
+// claim in a profile shares it (one authoring pass); when v2 probes prove
+// individual claims at different times, a per-claim fingerprint is the natural
+// extension of this field, not a redesign.
 type Claim struct {
-	Capability    serving.Capability `json:"capability"`
-	Supported     bool               `json:"supported"`
-	Status        ClaimStatus        `json:"status"`
-	Provenance    string             `json:"provenance"`     // where the claim came from
-	ProvenAgainst string             `json:"proven_against"` // fingerprint authored against
+	Capability serving.Capability `json:"capability"`
+	Supported  bool               `json:"supported"`
+	Status     ClaimStatus        `json:"status"`
+	Provenance string             `json:"provenance"` // where the claim came from
 }
 
 // ArchProfile is the serving contract for one architecture. It carries the
@@ -45,6 +51,10 @@ type Claim struct {
 type ArchProfile struct {
 	// Arch is the canonical config.json architectures[0] this profile keys on.
 	Arch string
+	// AuthoredAgainst is the environment fingerprint this profile's claims were
+	// authored/asserted against (§8). The staleness check warns when a target
+	// emit's fingerprint diverges from it — the v1 anti-fossil posture.
+	AuthoredAgainst fingerprint.Fingerprint
 	// AltArch are other architecture strings that resolve to this same profile.
 	AltArch []string
 	// ReasoningParser is the --reasoning-parser value for the Thinking capability

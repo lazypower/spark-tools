@@ -3,26 +3,30 @@ package profiles
 import (
 	"slices"
 
+	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
-// seededProvenance records where the v1 claims came from and the engine
-// fingerprint they were authored against. Per §8.0 every v1 claim ships
-// `asserted` against this fingerprint; the staleness check warns when a target
-// emit's fingerprint diverges from it.
-const (
-	seededProvenance    = "run.sh MODEL_MAP + AGENTS.md (vllm-config), 2026-06"
-	seededAgainstEngine = "vllm/vllm-openai@v0.23.0"
-)
+// seededProvenance records where the v1 claims came from. Per §8.0 every v1
+// claim ships `asserted`; the environment they were authored against is
+// seededFingerprint, stamped on each profile's AuthoredAgainst.
+const seededProvenance = "run.sh MODEL_MAP + AGENTS.md (vllm-config), 2026-06"
+
+// seededFingerprint is the GB10 Spark environment the v1 profiles were authored
+// against (AGENTS.md: image v0.23.0, GB10 / SM 12.1). The staleness check warns
+// when an operator emits for anything that diverges from this.
+var seededFingerprint = fingerprint.Fingerprint{
+	Engine:      "vllm/vllm-openai@v0.23.0",
+	Accelerator: "nvidia:gb10:sm121",
+}
 
 // asserted builds a hand-seeded claim with the v1 default status and provenance.
 func asserted(c serving.Capability, supported bool) Claim {
 	return Claim{
-		Capability:    c,
-		Supported:     supported,
-		Status:        StatusAsserted,
-		Provenance:    seededProvenance,
-		ProvenAgainst: seededAgainstEngine,
+		Capability: c,
+		Supported:  supported,
+		Status:     StatusAsserted,
+		Provenance: seededProvenance,
 	}
 }
 
@@ -82,6 +86,15 @@ var builtins = []ArchProfile{
 			asserted(serving.Vision, true),
 		},
 	},
+}
+
+// init stamps every built-in with the environment it was authored against, so
+// the fingerprint lives in one place (seededFingerprint) rather than repeated in
+// each literal.
+func init() {
+	for i := range builtins {
+		builtins[i].AuthoredAgainst = seededFingerprint
+	}
 }
 
 // BuiltinProfiles returns a copy of the v1 built-in arch-profile registry.

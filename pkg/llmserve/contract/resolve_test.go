@@ -5,17 +5,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
-// req builds a Request with the engine/hw fingerprint dimensions filled in (both
-// required to stamp the contract key), so each test states only what it varies.
+// matchingTarget is the same environment the v1 profiles were authored against,
+// so a default request produces no staleness warning.
+var matchingTarget = fingerprint.Fingerprint{
+	Engine:      "vllm/vllm-openai@v0.23.0",
+	Accelerator: "nvidia:gb10:sm121",
+}
+
+// req builds a Request whose target matches the profile's authored fingerprint
+// (so no staleness warning), letting each test state only what it varies.
 func req(name string, caps ...serving.Capability) Request {
 	return Request{
-		ServedName:    name,
-		Capabilities:  caps,
-		EngineDigest:  "vllm/vllm-openai@v0.23.0",
-		HWFingerprint: "nvidia:gb10:sm121",
+		ServedName:   name,
+		Capabilities: caps,
+		Target:       matchingTarget,
 	}
 }
 
@@ -252,7 +259,7 @@ func TestResolve_ContractKey_ModeIsOrderIndependent(t *testing.T) {
 }
 
 func TestResolve_RequiresServedNameAndPath(t *testing.T) {
-	if _, err := Resolve(Request{EngineDigest: "e", HWFingerprint: "h"}, qwenFacts()); err == nil {
+	if _, err := Resolve(Request{Target: matchingTarget}, qwenFacts()); err == nil {
 		t.Error("empty served name must be rejected")
 	}
 	facts := qwenFacts()
@@ -265,10 +272,40 @@ func TestResolve_RequiresServedNameAndPath(t *testing.T) {
 func TestResolve_RequiresEngineAndHWFingerprint(t *testing.T) {
 	// codex P1: a contract key with empty engine/hw dimensions cannot be
 	// staleness-checked, so the engine must refuse to stamp one.
-	if _, err := Resolve(Request{ServedName: "x", HWFingerprint: "h"}, qwenFacts()); err == nil {
+	if _, err := Resolve(Request{ServedName: "x", Target: fingerprint.Fingerprint{Accelerator: "h"}}, qwenFacts()); err == nil {
 		t.Error("missing engine digest must be rejected")
 	}
-	if _, err := Resolve(Request{ServedName: "x", EngineDigest: "e"}, qwenFacts()); err == nil {
-		t.Error("missing hardware fingerprint must be rejected")
+	if _, err := Resolve(Request{ServedName: "x", Target: fingerprint.Fingerprint{Engine: "e"}}, qwenFacts()); err == nil {
+		t.Error("missing accelerator fingerprint must be rejected")
+	}
+}
+
+func TestResolve_NoStalenessWarning_WhenTargetMatches(t *testing.T) {
+	got, err := Resolve(req("qwen-36b-fp4"), qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("matching target must produce no staleness warning, got %v", got.Warnings)
+	}
+}
+
+func TestResolve_StalenessWarning_WhenEngineDrifts(t *testing.T) {
+	r := req("qwen-36b-fp4")
+	r.Target.Engine = "vllm/vllm-openai@v0.30.0" // newer image than the profile was authored on
+	got, err := Resolve(r, qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatal("a drifted engine must produce a loud staleness warning (warn-not-gate)")
+	}
+	w := got.Warnings[0]
+	if !strings.Contains(w, "stale") || !strings.Contains(w, "v0.30.0") {
+		t.Errorf("staleness warning must name the drift and be dated/loud, got %q", w)
+	}
+	// warn-not-gate: it still resolves to valid flags, it does not block.
+	if len(got.Flags) == 0 {
+		t.Error("staleness is a warning, not a gate — flags must still be emitted")
 	}
 }

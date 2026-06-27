@@ -52,12 +52,15 @@ func TestBuiltins_EveryClaimAsserted(t *testing.T) {
 	// A non-asserted status in v1 data means someone hand-wrote a verdict, which
 	// only probes (v2) may do.
 	for _, p := range BuiltinProfiles() {
+		if p.AuthoredAgainst.Zero() {
+			t.Errorf("%s: profile must be stamped with the environment it was authored against", p.Arch)
+		}
 		for _, cl := range p.Claims {
 			if cl.Status != StatusAsserted {
 				t.Errorf("%s/%s: v1 claim status must be asserted, got %q", p.Arch, cl.Capability, cl.Status)
 			}
-			if cl.ProvenAgainst == "" || cl.Provenance == "" {
-				t.Errorf("%s/%s: claim must carry provenance and proven-against fingerprint", p.Arch, cl.Capability)
+			if cl.Provenance == "" {
+				t.Errorf("%s/%s: claim must carry provenance", p.Arch, cl.Capability)
 			}
 		}
 	}

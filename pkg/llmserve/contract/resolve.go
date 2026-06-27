@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
+	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
@@ -33,20 +35,22 @@ type Request struct {
 	ContextLen int
 	// Dtype is the vLLM --dtype value; empty defaults to "auto".
 	Dtype string
-	// EngineDigest identifies the engine image the launch targets (e.g.
-	// "vllm/vllm-openai@v0.23.0"); part of the contract key.
-	EngineDigest string
-	// HWFingerprint identifies the accelerator/host the launch targets; part of
-	// the contract key.
-	HWFingerprint string
+	// Target is the environment the launch is being emitted for (engine image +
+	// accelerator). It supplies the contract key's engine/hardware dimensions and
+	// is compared against the profile's authored fingerprint for the staleness
+	// warning. Both dimensions are required (an un-fingerprinted emit cannot be
+	// staleness-checked).
+	Target fingerprint.Fingerprint
 }
 
 // Resolved is a validated launch contract: the contract key it was validated
-// against and the ordered vLLM flags that realize the request. Rendering to a
-// concrete launch spec is the emit driver's responsibility.
+// against, the ordered vLLM flags that realize the request, and any staleness
+// warnings (the warn-not-gate posture — loud, but not a hard gate in v1).
+// Rendering to a concrete launch spec is the emit driver's responsibility.
 type Resolved struct {
-	Key   serving.ContractKey
-	Flags []string
+	Key      serving.ContractKey
+	Flags    []string
+	Warnings []string
 }
 
 // RejectionError is returned when a request cannot be served safely: an unknown
@@ -95,11 +99,11 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	// they are what the staleness check compares a future emit against. An emit
 	// stamped with an empty fingerprint cannot be re-verified, so reject it here
 	// rather than emit an un-stampable contract.
-	if req.EngineDigest == "" {
-		return nil, &RejectionError{Rule: "request", Reason: "engine image digest is required to stamp the contract key"}
+	if req.Target.Engine == "" {
+		return nil, &RejectionError{Rule: "request", Reason: "target engine image digest is required to stamp the contract key"}
 	}
-	if req.HWFingerprint == "" {
-		return nil, &RejectionError{Rule: "request", Reason: "hardware fingerprint is required to stamp the contract key"}
+	if req.Target.Accelerator == "" {
+		return nil, &RejectionError{Rule: "request", Reason: "target accelerator fingerprint is required to stamp the contract key"}
 	}
 
 	// 1. Arch profile must exist — an unknown arch has no validated contract.
@@ -150,11 +154,32 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 		Tokenizer:     facts.Tokenizer,
 		Quant:         facts.Quant,
 		Mode:          serving.ModeLabel(req.Capabilities),
-		EngineDigest:  req.EngineDigest,
-		HWFingerprint: req.HWFingerprint,
+		EngineDigest:  req.Target.Engine,
+		HWFingerprint: req.Target.Accelerator,
 	}
 
-	return &Resolved{Key: key, Flags: flags}, nil
+	// 7. Staleness warning (warn-not-gate, §8.0). The flags are asserted against
+	// the profile's authored environment; if the operator is emitting for a
+	// different engine/accelerator, the assertions may no longer hold (e.g.
+	// enforce-eager need, native FP4, structured outputs). Warn loudly and
+	// datedly — but do not block: v1 is emit + human-in-loop, and the hard
+	// pre-serve gate lands only when v2 owns automated launch.
+	var warnings []string
+	if drift := fingerprint.Drift(req.Target, profile.AuthoredAgainst); len(drift) > 0 {
+		warnings = append(warnings, stalenessWarning(facts.Arch, profile.AuthoredAgainst, drift))
+	}
+
+	return &Resolved{Key: key, Flags: flags, Warnings: warnings}, nil
+}
+
+// stalenessWarning renders the loud, dated "asserted + stale — re-verify" notice
+// for a profile whose authored environment differs from the emit target.
+func stalenessWarning(arch string, stamped fingerprint.Fingerprint, drift []string) string {
+	return fmt.Sprintf(
+		"asserted + stale — re-verify: profile %q was asserted against %s, but you are emitting for a different environment (%s). "+
+			"The validated flags may not hold here — re-check enforce-eager need, native FP4, and structured outputs against the target before trusting this launch.",
+		arch, stamped.Canonical(), strings.Join(drift, "; "),
+	)
 }
 
 // assembleFlags builds the ordered vLLM flag list from the validated request.
