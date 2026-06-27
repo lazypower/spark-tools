@@ -31,6 +31,7 @@ func rootCmd() *cobra.Command {
 	root.AddCommand(
 		emitCmd(), profilesCmd(), targetsCmd(),
 		upCmd(), downCmd(), statusCmd(), recoverCmd(), forgetCmd(),
+		livenessCmd(),
 	)
 	return root
 }

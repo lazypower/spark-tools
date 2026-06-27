@@ -78,13 +78,51 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 		return RuntimeState{Exists: false}, nil
 	}
 
+	services, err := inspectContainers(ctx, ids)
+	if err != nil {
+		return RuntimeState{}, err
+	}
+	return RuntimeState{Exists: true, Services: services}, nil
+}
+
+// ListManaged returns every llm-serve-managed container on the host (all
+// projects) with its labels — B2's liveness query reads this to find which
+// artifacts are in use.
+func (c *Compose) ListManaged(ctx context.Context) ([]ServiceState, error) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq",
+		"--filter", "label="+managedByLabel).Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps (managed): %w", err)
+	}
+	ids := strings.Fields(strings.TrimSpace(string(out)))
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return inspectContainers(ctx, ids)
+}
+
+// dockerPS returns the IDs of llm-serve-managed containers for a compose project.
+func (c *Compose) dockerPS(ctx context.Context, projectName string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq",
+		"--filter", "label=com.docker.compose.project="+projectName,
+		"--filter", "label="+managedByLabel)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w", err)
+	}
+	return out, nil
+}
+
+// inspectContainers runs `docker inspect` over container IDs and parses each into
+// a ServiceState (name, running, restart count, labels). Shared by Inspect and
+// ListManaged.
+func inspectContainers(ctx context.Context, ids []string) ([]ServiceState, error) {
 	args := append([]string{"inspect", "--format", "{{json .}}"}, ids...)
 	out, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
-		return RuntimeState{}, fmt.Errorf("docker inspect: %w", err)
+		return nil, fmt.Errorf("docker inspect: %w", err)
 	}
-
-	st := RuntimeState{Exists: true}
+	var services []ServiceState
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -100,26 +138,14 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 			} `json:"Config"`
 		}
 		if err := json.Unmarshal([]byte(line), &ins); err != nil {
-			return RuntimeState{}, fmt.Errorf("parsing docker inspect: %w", err)
+			return nil, fmt.Errorf("parsing docker inspect: %w", err)
 		}
-		st.Services = append(st.Services, ServiceState{
+		services = append(services, ServiceState{
 			Name:         strings.TrimPrefix(ins.Name, "/"),
 			Running:      ins.State.Running,
 			RestartCount: ins.RestartCount,
 			Labels:       ins.Config.Labels,
 		})
 	}
-	return st, nil
-}
-
-// dockerPS returns the IDs of llm-serve-managed containers for a compose project.
-func (c *Compose) dockerPS(ctx context.Context, projectName string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-aq",
-		"--filter", "label=com.docker.compose.project="+projectName,
-		"--filter", "label="+managedByLabel)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("docker ps: %w", err)
-	}
-	return out, nil
+	return services, nil
 }

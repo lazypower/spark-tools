@@ -50,8 +50,15 @@ func TestBuildPlan_SpecHasLabelsWatchdogAndContainerPath(t *testing.T) {
 			t.Errorf("emitted spec missing %q\n---\n%s", want, spec)
 		}
 	}
-	if strings.Contains(spec, "/srv/models/Qwen3.6-35B-A3B-NVFP4") {
-		t.Errorf("host path must not survive into --model\n---\n%s", spec)
+	// The host path must not be a COMMAND value (--model must be the container
+	// path). It DOES legitimately appear in the artifact-host-path label, so check
+	// the quoted command-entry form specifically, not the whole spec.
+	if strings.Contains(spec, `- "/srv/models/Qwen3.6-35B-A3B-NVFP4"`) {
+		t.Errorf("host path must not survive into the --model command value\n---\n%s", spec)
+	}
+	// And it MUST appear as the artifact-host-path label (B2 reads it).
+	if !strings.Contains(spec, "artifact-host-path=/srv/models/Qwen3.6-35B-A3B-NVFP4") {
+		t.Errorf("emit must stamp the artifact-host-path label for B2 liveness\n---\n%s", spec)
 	}
 }
 

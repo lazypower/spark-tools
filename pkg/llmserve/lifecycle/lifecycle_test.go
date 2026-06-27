@@ -57,6 +57,16 @@ func (f *fakeRuntime) Inspect(_ context.Context, _, _ string) (runtime.RuntimeSt
 	return f.serveFor[f.active], nil
 }
 
+func (f *fakeRuntime) ListManaged(context.Context) ([]runtime.ServiceState, error) {
+	if f.inspErr != nil {
+		return nil, f.inspErr
+	}
+	if f.active == "" {
+		return nil, nil
+	}
+	return f.serveFor[f.active].Services, nil
+}
+
 type fakeProber struct{ health, warmup bool }
 
 func (p fakeProber) Health(context.Context, string) (bool, error) { return p.health, nil }

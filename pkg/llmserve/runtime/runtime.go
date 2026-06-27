@@ -49,6 +49,10 @@ type Runtime interface {
 	Down(ctx context.Context, projectName, specPath string) error
 	// Inspect reports the actual runtime state of the project's stack.
 	Inspect(ctx context.Context, projectName, specPath string) (RuntimeState, error)
+	// ListManaged reports every llm-serve-managed container on the host, across
+	// all projects, with its labels. It is what B2's liveness query reads to find
+	// which artifacts are in use — independent of any single instance's spec.
+	ListManaged(ctx context.Context) ([]ServiceState, error)
 }
 
 // Prober checks a running endpoint. Both checks are part of the serving predicate;

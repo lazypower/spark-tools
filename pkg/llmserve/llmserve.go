@@ -19,6 +19,7 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
+	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
@@ -100,6 +101,13 @@ func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
 		Prober:  runtime.NewHTTPProber(),
 		SpecDir: specDir,
 	}
+}
+
+// NewLiveness wires the B2 liveness authority over the manifest store and the
+// real compose runtime. It answers "is this artifact protected from eviction?"
+// for tools like llm-tidy — derived live, fail-closed.
+func NewLiveness(stateDir string) *liveness.Liveness {
+	return liveness.New(instance.NewStore(stateDir), runtime.NewCompose())
 }
 
 // EnsureWatchdogScript writes the embedded watchdog.sh into dir (idempotently) so

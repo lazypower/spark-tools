@@ -28,6 +28,12 @@ const (
 	LabelModelID     = "model-id"
 	LabelModelRev    = "model-revision"
 	LabelTarget      = "target-fingerprint"
+	// LabelArtifactHostPath carries the canonical HOST directory the model
+	// artifact lives in. It is what B2's liveness query reads to map a running
+	// container back to the artifact it serves — the container's --model arg is the
+	// CONTAINER path, not the host path, so it cannot be used for eviction
+	// protection. Stamped on every emitted service.
+	LabelArtifactHostPath = "artifact-host-path"
 
 	// ManagedByValue marks a stack as llm-serve-owned (the filter Inspect uses).
 	ManagedByValue = "llm-serve"
@@ -42,14 +48,15 @@ const (
 // (reconcile), so the two can never drift.
 func IdentityLabels(d instance.Desired) map[string]string {
 	return map[string]string{
-		LabelManagedBy:   ManagedByValue,
-		LabelInstance:    d.Name,
-		LabelContractKey: d.ContractKey.Canonical(),
-		LabelSpecHash:    d.SpecHash,
-		LabelServedName:  d.ServedName,
-		LabelModelID:     d.ModelID,
-		LabelModelRev:    d.ModelRevision,
-		LabelTarget:      d.Target.Canonical(),
+		LabelManagedBy:        ManagedByValue,
+		LabelInstance:         d.Name,
+		LabelContractKey:      d.ContractKey.Canonical(),
+		LabelSpecHash:         d.SpecHash,
+		LabelServedName:       d.ServedName,
+		LabelModelID:          d.ModelID,
+		LabelModelRev:         d.ModelRevision,
+		LabelTarget:           d.Target.Canonical(),
+		LabelArtifactHostPath: d.ModelDir,
 	}
 }
 
