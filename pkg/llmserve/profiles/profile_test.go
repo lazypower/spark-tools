@@ -45,6 +45,10 @@ func TestLookup_CanonicalAndAlt(t *testing.T) {
 	if _, ok := Lookup("NopeForCausalLM"); ok {
 		t.Error("unknown arch must not resolve")
 	}
+	// GLM-4.7-Flash (Glm4MoeLite) must resolve to the GLM profile, not be refused.
+	if _, ok := Lookup("Glm4MoeLiteForCausalLM"); !ok {
+		t.Error("Glm4MoeLite (GLM-4.7-Flash) must resolve to the GLM profile")
+	}
 }
 
 func TestBuiltins_EveryClaimAsserted(t *testing.T) {

@@ -64,9 +64,14 @@ var builtins = []ArchProfile{
 			asserted(serving.Vision, false),
 		},
 	},
-	// GLM-4.x MoE (GLM-4.7-Flash NVFP4). Guided decoding; no thinking parser seeded.
+	// GLM-4.x MoE. Guided decoding; no thinking parser seeded — run.sh serves the
+	// GLM models with no reasoning/tool flags (plain NVFP4), so the contract is the
+	// same across the MoE and MoE-Lite variants. Glm4MoeLite is GLM-4.7-Flash;
+	// Glm4Moe is GLM-4.5/4.6-Air. Both are alt-archs of one contract until a probe
+	// (v2) shows they diverge.
 	{
-		Arch: "Glm4MoeForCausalLM",
+		Arch:    "Glm4MoeForCausalLM",
+		AltArch: []string{"Glm4MoeLiteForCausalLM"},
 		Claims: []Claim{
 			asserted(serving.GuidedDecoding, true),
 			asserted(serving.Thinking, false),

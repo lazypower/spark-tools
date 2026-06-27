@@ -17,7 +17,7 @@ import (
 func TestCompose_RoundTrips(t *testing.T) {
 	r := &contract.Resolved{
 		Flags: []string{
-			"--model", "/models/hf/Qwen3.6-35B-A3B-NVFP4",
+			"--model", "/srv/models/Qwen3.6-35B-A3B-NVFP4",
 			"--served-model-name", "qwen-36b-fp4",
 			"--dtype", "auto",
 			"--max-model-len", "131072",
@@ -28,7 +28,12 @@ func TestCompose_RoundTrips(t *testing.T) {
 			"--quantization", "moe_wna16",
 		},
 	}
-	out := Compose(r, Host{Image: "vllm/vllm-openai:v0.23.0", Port: 8000})
+	host := Host{Image: "vllm/vllm-openai:v0.23.0", Port: 8000, Volumes: []Mount{{Host: "/srv/models", Container: "/models/hf"}}}
+	// The command in the spec must round-trip to exactly the HOST-SPECIALIZED
+	// flags (model rewritten to the container path, container path served as a
+	// name) — that is what actually launches.
+	want, _ := planLaunch(r, host)
+	out := Compose(r, host)
 
 	var doc struct {
 		Services map[string]struct {
@@ -42,12 +47,12 @@ func TestCompose_RoundTrips(t *testing.T) {
 	if !ok {
 		t.Fatalf("emitted compose has no vllm service\n---\n%s", out)
 	}
-	if len(svc.Command) != len(r.Flags) {
-		t.Fatalf("command arg count %d != validated flag count %d\ngot: %#v", len(svc.Command), len(r.Flags), svc.Command)
+	if len(svc.Command) != len(want) {
+		t.Fatalf("command arg count %d != planned flag count %d\ngot: %#v", len(svc.Command), len(want), svc.Command)
 	}
-	for i := range r.Flags {
-		if svc.Command[i] != r.Flags[i] {
-			t.Errorf("arg %d: emitted %q, validated %q — serialization altered the flag", i, svc.Command[i], r.Flags[i])
+	for i := range want {
+		if svc.Command[i] != want[i] {
+			t.Errorf("arg %d: emitted %q, planned %q — serialization altered the flag", i, svc.Command[i], want[i])
 		}
 	}
 }

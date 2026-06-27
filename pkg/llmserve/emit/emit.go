@@ -9,6 +9,8 @@ package emit
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -62,16 +64,82 @@ func (h Host) service() string {
 	return h.ServiceName
 }
 
-// warningComment renders the contract's staleness warnings as leading comment
-// lines so the operator sees them in the emitted artifact itself (the
-// warn-not-gate posture: loud, in-band, but not blocking). Returns "" when there
-// are no warnings.
-func warningComment(r *contract.Resolved, prefix string) string {
-	if len(r.Warnings) == 0 {
+// planLaunch specializes the validated flags for a concrete host — the per-host
+// driver's core job. The contract emits --model with the artifact's HOST path
+// (it knows nothing about mounts); planLaunch rewrites it to the path the model
+// resolves to INSIDE the container via the volume mounts, and serves that
+// container path as an additional model name so callers that address the model
+// by path keep resolving (run.sh parity: alias + container path). It returns the
+// host-ready flags and the combined warnings (the contract's staleness warning
+// plus any host-specialization warning, e.g. a model not covered by a mount —
+// which would make the emitted spec fail to find the model at runtime).
+func planLaunch(r *contract.Resolved, h Host) (flags []string, warnings []string) {
+	flags = slices.Clone(r.Flags)
+	warnings = append(warnings, r.Warnings...)
+
+	mi := flagIndex(flags, "--model")
+	if mi < 0 || mi+1 >= len(flags) {
+		return flags, warnings
+	}
+	hostPath := flags[mi+1]
+	cp, ok := containerPath(hostPath, h.Volumes)
+	if !ok {
+		warnings = append(warnings, fmt.Sprintf(
+			"--model %s is not covered by any volume mount; the container will not find the model — add a matching --mount <hostdir>:<containerdir>",
+			hostPath))
+		return flags, warnings
+	}
+	flags[mi+1] = cp
+
+	// Serve the container path as an additional --served-model-name (run.sh
+	// parity), so scripts that address the model by its /models/... path resolve.
+	if si := flagIndex(flags, "--served-model-name"); si >= 0 && si+1 < len(flags) && flags[si+1] != cp {
+		flags = slices.Insert(flags, si+2, cp)
+	}
+	return flags, warnings
+}
+
+// flagIndex returns the position of a flag token, or -1.
+func flagIndex(flags []string, name string) int {
+	return slices.Index(flags, name)
+}
+
+// containerPath maps a host path to the path it is bound to inside the container
+// via the volume mounts. Relative mount host paths are resolved against the
+// current directory (where compose/run is invoked from, as run.sh does). Returns
+// ok=false when no mount covers the path — the caller turns that into a loud
+// warning rather than emitting a spec that silently can't find its model.
+func containerPath(hostPath string, mounts []Mount) (string, bool) {
+	absModel, err := filepath.Abs(hostPath)
+	if err != nil {
+		return "", false
+	}
+	for _, m := range mounts {
+		absHost, err := filepath.Abs(m.Host)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(absHost, absModel)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // model is not under this mount
+		}
+		if rel == "." {
+			return m.Container, true
+		}
+		return path.Join(m.Container, filepath.ToSlash(rel)), true
+	}
+	return "", false
+}
+
+// warningComment renders warnings as leading comment lines so the operator sees
+// them in the emitted artifact itself (warn-not-gate: loud, in-band, not
+// blocking). Returns "" when there are none.
+func warningComment(warnings []string, prefix string) string {
+	if len(warnings) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, w := range r.Warnings {
+	for _, w := range warnings {
 		for line := range strings.SplitSeq(w, "\n") {
 			b.WriteString(prefix)
 			b.WriteString(" WARNING: ")
@@ -86,8 +154,9 @@ func warningComment(r *contract.Resolved, prefix string) string {
 // emitted verbatim after the image; host facts (runtime, port, mounts) precede
 // it. Long lines are continued for readability.
 func DockerRun(r *contract.Resolved, h Host) string {
+	flags, warnings := planLaunch(r, h)
 	var b strings.Builder
-	b.WriteString(warningComment(r, "#"))
+	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("docker run -d \\\n")
 	fmt.Fprintf(&b, "  --runtime %s --gpus all \\\n", h.runtime())
 	b.WriteString("  --ipc host \\\n")
@@ -96,9 +165,9 @@ func DockerRun(r *contract.Resolved, h Host) string {
 		fmt.Fprintf(&b, "  -v %s:%s:ro \\\n", m.Host, m.Container)
 	}
 	fmt.Fprintf(&b, "  %s \\\n", h.Image)
-	for i, f := range r.Flags {
+	for i, f := range flags {
 		cont := " \\"
-		if i == len(r.Flags)-1 {
+		if i == len(flags)-1 {
 			cont = ""
 		}
 		fmt.Fprintf(&b, "  %s%s\n", quoteArg(f), cont)
@@ -111,8 +180,9 @@ func DockerRun(r *contract.Resolved, h Host) string {
 // mounts, and the validated flags as the command. The watchdog sidecar is NOT
 // emitted — that is runtime supervision (v2 B); v1 emits only the engine service.
 func Compose(r *contract.Resolved, h Host) string {
+	flags, warnings := planLaunch(r, h)
 	var b strings.Builder
-	b.WriteString(warningComment(r, "#"))
+	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("services:\n")
 	fmt.Fprintf(&b, "  %s:\n", h.service())
 	fmt.Fprintf(&b, "    image: %s\n", h.Image)
@@ -130,7 +200,7 @@ func Compose(r *contract.Resolved, h Host) string {
 		}
 	}
 	b.WriteString("    command:\n")
-	for _, f := range r.Flags {
+	for _, f := range flags {
 		fmt.Fprintf(&b, "      - %s\n", yamlScalar(f))
 	}
 	return b.String()
@@ -140,8 +210,9 @@ func Compose(r *contract.Resolved, h Host) string {
 // expressed as a systemd-managed container — the future driver the seam table
 // names, shipped in v1 to prove the seam is real, not theoretical.
 func Quadlet(r *contract.Resolved, h Host) string {
+	flags, warnings := planLaunch(r, h)
 	var b strings.Builder
-	b.WriteString(warningComment(r, "#"))
+	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("[Container]\n")
 	fmt.Fprintf(&b, "Image=%s\n", h.Image)
 	fmt.Fprintf(&b, "PublishPort=%d:8000\n", h.port())
@@ -150,7 +221,7 @@ func Quadlet(r *contract.Resolved, h Host) string {
 		fmt.Fprintf(&b, "Volume=%s:%s:ro\n", m.Host, m.Container)
 	}
 	// Quadlet Exec is a single line carrying the full vLLM command.
-	fmt.Fprintf(&b, "Exec=%s\n", quoteArgs(r.Flags))
+	fmt.Fprintf(&b, "Exec=%s\n", quoteArgs(flags))
 	b.WriteString("\n[Install]\nWantedBy=default.target\n")
 	return b.String()
 }
