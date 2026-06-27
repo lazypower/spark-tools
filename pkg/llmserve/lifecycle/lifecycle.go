@@ -55,11 +55,13 @@ func (o *Orchestrator) pollInterval() time.Duration {
 	return o.PollInterval
 }
 
-// specPath is keyed by name AND spec hash, so a replace's candidate spec never
-// overwrites the current spec (distinct contracts ⇒ distinct hashes ⇒ distinct
-// files), making restore-on-failure possible.
-func (o *Orchestrator) specPath(name, specHash string) string {
-	return filepath.Join(o.SpecDir, name+"-"+specHash+".compose.yml")
+// specPath is keyed by name AND the full IDENTITY tag, so a replace's candidate
+// spec never overwrites the current spec. Keying on the command hash alone was
+// unsafe: two distinct identities (e.g. differing only by target accelerator or
+// model revision) can render the same command and would collide, letting the
+// candidate clobber current and lose it for restore.
+func (o *Orchestrator) specPath(d instance.Desired) string {
+	return filepath.Join(o.SpecDir, d.Name+"-"+IdentityTag(d)+".compose.yml")
 }
 
 func (o *Orchestrator) writeSpec(path, content string) error {
@@ -96,12 +98,16 @@ func (o *Orchestrator) Up(ctx context.Context, plan Plan) (Result, error) {
 	case err != nil:
 		return Result{}, err
 	default:
-		if existing.Desired.ContractKey == plan.Desired.ContractKey {
+		// Idempotency is keyed on the FULL identity, not just the contract key
+		// (which omits model id/revision/served name/target) — otherwise a
+		// revision bump with an unchanged contract key would be reported "already
+		// serving" the old model and never applied.
+		if SameIdentity(existing.Desired, plan.Desired) {
 			rec := Reconcile(ctx, o.Runtime, o.Prober, existing.Desired, existing.Desired.Endpoint)
 			if rec.serving() {
 				return Result{StatusServing, "already serving (no change)", false}, nil
 			}
-			return o.bringUp(ctx, plan) // same contract, not serving — (re)bring up
+			return o.bringUp(ctx, plan) // same identity, not serving — (re)bring up
 		}
 		return o.replace(ctx, existing.Desired, plan)
 	}
@@ -111,7 +117,7 @@ func (o *Orchestrator) Up(ctx context.Context, plan Plan) (Result, error) {
 // → wait for serving → clear, with fail-closed cleanup on any failure.
 func (o *Orchestrator) bringUp(ctx context.Context, plan Plan) (Result, error) {
 	d := plan.Desired
-	d.SpecPath = o.specPath(d.Name, d.SpecHash)
+	d.SpecPath = o.specPath(d)
 	if err := o.writeSpec(d.SpecPath, plan.Spec); err != nil {
 		return Result{}, err
 	}
@@ -137,7 +143,7 @@ func (o *Orchestrator) bringUp(ctx context.Context, plan Plan) (Result, error) {
 // failure current is best-effort restored and never falsely reported serving.
 func (o *Orchestrator) replace(ctx context.Context, current instance.Desired, plan Plan) (Result, error) {
 	cand := plan.Desired
-	cand.SpecPath = o.specPath(cand.Name, cand.SpecHash)
+	cand.SpecPath = o.specPath(cand)
 	if err := o.writeSpec(cand.SpecPath, plan.Spec); err != nil {
 		return Result{}, err
 	}

@@ -65,6 +65,19 @@ func TestHTTPProber_Warmup_ServesRequestedModel(t *testing.T) {
 	}
 }
 
+func TestHTTPProber_Warmup_EmptyContent_Fails(t *testing.T) {
+	// codex Mode-B P1: a 200 with an empty completion is NOT evidence of serving;
+	// the predicate requires a non-empty generation.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"choices":[{"message":{"content":""}}]}`)
+	}))
+	defer srv.Close()
+	p := NewHTTPProber()
+	if ok, err := p.Warmup(context.Background(), srv.URL, "m"); ok || err == nil {
+		t.Errorf("an empty completion must fail warmup, got ok=%v err=%v", ok, err)
+	}
+}
+
 func TestHTTPProber_Warmup_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 200 but an embedded error object ⇒ not a real generation.

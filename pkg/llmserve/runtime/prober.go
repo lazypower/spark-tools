@@ -50,7 +50,7 @@ func (p *HTTPProber) Warmup(ctx context.Context, baseURL, servedName string) (bo
 	body, _ := json.Marshal(map[string]any{
 		"model":      servedName,
 		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
-		"max_tokens": 1,
+		"max_tokens": 16,
 		"stream":     false,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -81,7 +81,12 @@ func (p *HTTPProber) Warmup(ctx context.Context, baseURL, servedName string) (bo
 	if len(out.Error) > 0 && string(out.Error) != "null" {
 		return false, fmt.Errorf("warmup API error: %s", out.Error)
 	}
-	// A 200 with the requested model and a well-formed (possibly empty-string at
-	// max_tokens=1) choice is sufficient evidence the model is loaded and serving.
-	return len(out.Choices) > 0, nil
+	// The predicate requires evidence of an actual generation, not just a 200 with
+	// an empty choice — require a non-empty completion for the requested model.
+	for _, c := range out.Choices {
+		if c.Message.Content != "" {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("warmup for %q returned no generated content", servedName)
 }

@@ -104,7 +104,7 @@ func TestUp_FreshSuccess(t *testing.T) {
 	rt := newFakeRuntime()
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 
 	res, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"})
 	if err != nil {
@@ -126,7 +126,7 @@ func TestUp_FailsToServe_ConfirmedCleanup(t *testing.T) {
 	rt := newFakeRuntime()                                       // confirmsDown=true
 	o := newOrch(t, rt, fakeProber{health: true, warmup: false}) // warmup never passes
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 
 	_, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"})
 	if err == nil {
@@ -145,7 +145,7 @@ func TestUp_FailsToServe_UnconfirmedCleanup_KeepsHandle(t *testing.T) {
 	rt.confirmsDown = false // Down can't confirm absence
 	o := newOrch(t, rt, fakeProber{health: true, warmup: false})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 
 	_, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"})
 	if err == nil {
@@ -164,7 +164,7 @@ func TestUp_Idempotent_AlreadyServing(t *testing.T) {
 	rt := newFakeRuntime()
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 
 	if _, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"}); err != nil {
 		t.Fatal(err)
@@ -187,8 +187,8 @@ func TestUp_DestructiveReplace_Success(t *testing.T) {
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	a := desired("qwen", "hashA", "base")
 	b := desired("qwen", "hashB", "thinking") // different contract key
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(a)
-	rt.serveFor[o.specPath("qwen", "hashB")] = servingState(b)
+	rt.serveFor[o.specPath(a)] = servingState(a)
+	rt.serveFor[o.specPath(b)] = servingState(b)
 
 	if _, err := o.Up(context.Background(), Plan{Desired: a, Spec: "spec-A"}); err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestUp_DestructiveReplace_FailRestoresCurrent(t *testing.T) {
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	a := desired("qwen", "hashA", "base")
 	b := desired("qwen", "hashB", "thinking")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(a)
+	rt.serveFor[o.specPath(a)] = servingState(a)
 	// candidate B is mapped to nothing → never serves.
 
 	if _, err := o.Up(context.Background(), Plan{Desired: a, Spec: "spec-A"}); err != nil {
@@ -233,11 +233,50 @@ func TestUp_DestructiveReplace_FailRestoresCurrent(t *testing.T) {
 	}
 }
 
+func TestUp_RevisionChange_SameContractKey_Replaces(t *testing.T) {
+	// codex Mode-B P1: a revision bump with an UNCHANGED contract key must replace,
+	// not be reported "already serving" the old model.
+	rt := newFakeRuntime()
+	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
+	a := desired("qwen", "hashA", "base")
+	b := desired("qwen", "hashA", "base") // identical contract key
+	b.ModelRevision = "rev2"              // but a different artifact revision
+	rt.serveFor[o.specPath(a)] = servingState(a)
+	rt.serveFor[o.specPath(b)] = servingState(b)
+
+	if _, err := o.Up(context.Background(), Plan{Desired: a, Spec: "spec-A"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := o.Up(context.Background(), Plan{Desired: b, Spec: "spec-B"})
+	if err != nil {
+		t.Fatalf("revision change up: %v", err)
+	}
+	if !res.Replaced {
+		t.Error("a revision change must trigger a replace, not a no-op")
+	}
+	in, _ := o.Store.Load("qwen")
+	if in.Desired.ModelRevision != "rev2" {
+		t.Errorf("revision change must be applied, desired still at %q", in.Desired.ModelRevision)
+	}
+}
+
+func TestSpecPath_DistinctForSameCommandDifferentIdentity(t *testing.T) {
+	// codex Mode-B P1: distinct identities that render the same command must NOT
+	// share a spec path (else a replace's candidate clobbers current).
+	o := newOrch(t, newFakeRuntime(), fakeProber{})
+	a := desired("qwen", "samehash", "base")
+	b := desired("qwen", "samehash", "base")
+	b.Target.Accelerator = "other-accel" // same SpecHash, different identity
+	if o.specPath(a) == o.specPath(b) {
+		t.Error("distinct identities must get distinct spec paths even with an identical command hash")
+	}
+}
+
 func TestDown_Confirmed_RemovesManifest(t *testing.T) {
 	rt := newFakeRuntime()
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 	if _, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"}); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +292,7 @@ func TestDown_Unconfirmed_KeepsCleanupRequired(t *testing.T) {
 	rt := newFakeRuntime()
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
+	rt.serveFor[o.specPath(d)] = servingState(d)
 	if _, err := o.Up(context.Background(), Plan{Desired: d, Spec: "spec-A"}); err != nil {
 		t.Fatal(err)
 	}
@@ -282,8 +321,8 @@ func TestStatus_Conflict_OnLabelMismatch(t *testing.T) {
 	foreign := runtime.RuntimeState{Exists: true, Services: []runtime.ServiceState{
 		{Name: "vllm", Running: true, Labels: map[string]string{"managed-by": "someone-else"}},
 	}}
-	rt.serveFor[o.specPath("qwen", "hashA")] = foreign
-	rt.active = o.specPath("qwen", "hashA")
+	rt.serveFor[o.specPath(d)] = foreign
+	rt.active = o.specPath(d)
 	if err := o.Store.Save(instance.Instance{Desired: d}); err != nil {
 		t.Fatal(err)
 	}
@@ -331,10 +370,10 @@ func TestReconcile_MissingWatchdog_FailsClosed(t *testing.T) {
 	want := IdentityLabels(d)
 	engine := want
 	engine[composeServiceLabel] = "vllm"
-	rt.serveFor[o.specPath("qwen", "hashA")] = runtime.RuntimeState{
+	rt.serveFor[o.specPath(d)] = runtime.RuntimeState{
 		Exists: true, Services: []runtime.ServiceState{{Name: "vllm", Running: true, Labels: engine}},
 	}
-	rt.active = o.specPath("qwen", "hashA")
+	rt.active = o.specPath(d)
 	rec := Reconcile(context.Background(), rt, fakeProber{health: true, warmup: true}, d, d.Endpoint)
 	if rec.Status != StatusNotServing {
 		t.Errorf("missing watchdog must fail closed (not-serving), got %q: %s", rec.Status, rec.Reason)
@@ -346,8 +385,8 @@ func TestForget_RefusesWhenStackMayLive(t *testing.T) {
 	rt.confirmsDown = false
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	rt.serveFor[o.specPath("qwen", "hashA")] = servingState(d)
-	rt.active = o.specPath("qwen", "hashA")
+	rt.serveFor[o.specPath(d)] = servingState(d)
+	rt.active = o.specPath(d)
 	_ = o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseCleanupRequired}})
 
 	if err := o.Forget(context.Background(), "qwen", false); err == nil {

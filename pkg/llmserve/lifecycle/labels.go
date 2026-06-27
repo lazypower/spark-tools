@@ -6,6 +6,11 @@
 package lifecycle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"maps"
+	"slices"
+
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 )
 
@@ -58,4 +63,30 @@ func matchesIdentity(containerLabels, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// SameIdentity reports whether two desired records are the SAME managed
+// configuration across the FULL identity (not just the contract key — which omits
+// model id/revision/served name/target). A re-up of the same identity is an
+// idempotent no-op; any identity difference is a change that triggers a replace.
+func SameIdentity(a, b instance.Desired) bool {
+	return maps.Equal(IdentityLabels(a), IdentityLabels(b))
+}
+
+// IdentityTag is a stable short hash of the full identity, used to key the
+// managed spec file so two DIFFERENT identities that happen to render the same
+// command (same SpecHash) never share a spec path — which would let a replace's
+// candidate overwrite the current spec and lose it for restore.
+func IdentityTag(d instance.Desired) string {
+	labels := IdentityLabels(d)
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		h.Write([]byte(k + "=" + labels[k] + "\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
