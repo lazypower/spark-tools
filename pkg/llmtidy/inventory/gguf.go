@@ -1,12 +1,19 @@
 package inventory
 
 import (
+	"strings"
+
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 // GGUFList walks the hfetch registry and returns one InstalledModel per
 // completed GGUF file. A single repo with multiple quants therefore
 // contributes multiple rows.
+//
+// Only .gguf files are surfaced. The hfetch registry is shared state: an
+// `hfetch pull --profile vllm` records non-GGUF serve-ready files (safetensors
+// shards, config, tokenizer) too, and those must not be miscategorized as GGUF
+// models here (enforced by pkg/seam).
 func GGUFList(r *registry.Registry) ([]InstalledModel, error) {
 	if err := r.Load(); err != nil {
 		return nil, err
@@ -14,7 +21,7 @@ func GGUFList(r *registry.Registry) ([]InstalledModel, error) {
 	var out []InstalledModel
 	for _, lm := range r.List() {
 		for _, f := range lm.Files {
-			if !f.Complete {
+			if !f.Complete || !strings.HasSuffix(f.Filename, ".gguf") {
 				continue
 			}
 			name := lm.ID
