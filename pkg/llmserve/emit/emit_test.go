@@ -175,6 +175,21 @@ func TestEmit_LabelOrderDeterministic(t *testing.T) {
 	}
 }
 
+func TestCompose_NumericCommandValuesAreQuoted(t *testing.T) {
+	// Operator P1: docker compose requires every command entry to be a STRING. A
+	// bare numeric (--max-model-len 131072) is rejected. A lenient Go YAML parser
+	// coerces it (so a round-trip test misses this), so assert the raw rendering
+	// quotes it.
+	r := &contract.Resolved{Flags: []string{"--max-model-len", "131072", "--port-ish", "8000"}}
+	out := Compose(r, Host{Image: "img", Port: 8000})
+	if !strings.Contains(out, `- "131072"`) {
+		t.Errorf("numeric command value must be a quoted string, not bare\n---\n%s", out)
+	}
+	if strings.Contains(out, "- 131072\n") {
+		t.Errorf("bare numeric command value would be rejected by docker compose\n---\n%s", out)
+	}
+}
+
 func TestRender_UnknownTargetErrors(t *testing.T) {
 	if _, err := Render(Target("helm"), sampleResolved(), sampleHost()); err == nil {
 		t.Error("an unknown render target must error, not silently default")

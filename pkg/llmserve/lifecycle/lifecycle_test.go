@@ -306,6 +306,25 @@ func TestDown_Unconfirmed_KeepsCleanupRequired(t *testing.T) {
 	}
 }
 
+func TestForget_NeverStarted_ConfirmsWithoutAcceptOrphan(t *testing.T) {
+	// Operator minor: a cleanup_required manifest whose stack never actually
+	// started (nothing running) must be forgettable WITHOUT --accept-orphan —
+	// Inspect proves absence even if `compose down` can't parse a broken spec.
+	rt := newFakeRuntime()                // nothing active ⇒ Inspect reports !Exists
+	rt.downErr = context.DeadlineExceeded // even if Down errors on a broken spec
+	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
+	d := desired("qwen", "hashA", "base")
+	if err := o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseCleanupRequired}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Forget(context.Background(), "qwen", false); err != nil {
+		t.Errorf("a never-started cleanup_required must forget without --accept-orphan, got %v", err)
+	}
+	if _, err := o.Store.Load("qwen"); err != instance.ErrNotFound {
+		t.Error("manifest should be cleared")
+	}
+}
+
 func TestDown_Absent_NoOp(t *testing.T) {
 	o := newOrch(t, newFakeRuntime(), fakeProber{})
 	if err := o.Down(context.Background(), "ghost"); err != nil {

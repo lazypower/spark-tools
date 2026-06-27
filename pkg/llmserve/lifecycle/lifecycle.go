@@ -202,8 +202,16 @@ func (o *Orchestrator) failCleanup(ctx context.Context, d instance.Desired, reas
 		fmt.Errorf("%s (cleanup_required)", reason)
 }
 
-// confirmedDown runs Down then verifies via Inspect that no stack remains.
+// confirmedDown ensures no stack remains for an instance. Absence is proven by
+// Inspect (which queries the runtime by label, independent of the spec file), so
+// if nothing is running we confirm immediately — even when the spec is
+// unparseable and `compose down` would fail (the never-started / broken-spec
+// case). Only when a stack IS present do we require a clean teardown AND a
+// follow-up Inspect showing it gone. Any Inspect error ⇒ unconfirmed (fail closed).
 func (o *Orchestrator) confirmedDown(ctx context.Context, d instance.Desired) bool {
+	if state, err := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath); err == nil && !state.Exists {
+		return true // nothing to tear down — absence already proven by the runtime
+	}
 	downErr := o.Runtime.Down(ctx, d.ProjectName, d.SpecPath)
 	state, inspErr := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath)
 	return downErr == nil && inspErr == nil && !state.Exists

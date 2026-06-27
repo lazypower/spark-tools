@@ -258,7 +258,12 @@ func Compose(r *contract.Resolved, h Host) string {
 	}
 	b.WriteString("    command:\n")
 	for _, f := range flags {
-		fmt.Fprintf(&b, "      - %s\n", yamlScalar(f))
+		// Every command entry MUST render as a YAML string. A bare numeric value
+		// (e.g. --max-model-len 131072) is otherwise parsed as an int and docker
+		// compose rejects it ("command.N must be a string"). Always-quote — a
+		// lenient Go YAML parser coerces ints to strings (so a round-trip test
+		// misses this), but compose does not.
+		fmt.Fprintf(&b, "      - %s\n", yamlQuoted(f))
 	}
 
 	if h.Watchdog != nil {
@@ -404,4 +409,13 @@ func yamlScalar(s string) string {
 		return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 	}
 	return s
+}
+
+// yamlQuoted always renders s as a YAML double-quoted scalar, forcing the string
+// type. Used for command entries, which docker compose requires to be strings —
+// a bare numeric/bool/null token would be coerced to the wrong type.
+func yamlQuoted(s string) string {
+	r := strings.ReplaceAll(s, `\`, `\\`)
+	r = strings.ReplaceAll(r, `"`, `\"`)
+	return `"` + r + `"`
 }
