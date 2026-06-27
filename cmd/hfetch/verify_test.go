@@ -74,26 +74,6 @@ func TestVerifyOne_Bitrot_Fails(t *testing.T) {
 	}
 }
 
-func TestApiFileSource_HeadUsesTreeMetadata(t *testing.T) {
-	// Head must return the size/hash injected from the tree listing, never a
-	// network HEAD — otherwise non-LFS files get size 0 (→ 0-byte download).
-	// Client base URL points nowhere; if Head dialed out, this would error.
-	src := &apiFileSource{
-		client:  api.NewClient(api.WithBaseURL("http://127.0.0.1:0"), api.WithToken("t")),
-		modelID: "org/model",
-		file:    "config.json",
-		size:    1234,
-		sha256:  "", // non-LFS: no content hash
-	}
-	size, sha, err := src.Head(context.Background())
-	if err != nil {
-		t.Fatalf("Head should not error (no network): %v", err)
-	}
-	if size != 1234 || sha != "" {
-		t.Errorf("Head should echo tree metadata, got size=%d sha=%q", size, sha)
-	}
-}
-
 func TestVerifyOne_NotDownloaded_Fails(t *testing.T) {
 	_, client := treeServer(t, `[]`)
 	err := verifyOne(context.Background(), client, "org/model", filepath.Join(t.TempDir(), "absent"))

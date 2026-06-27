@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/lazypower/spark-tools/pkg/hfetch/download"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/pkg/hfetch/source"
 )
 
 // Re-export key types from sub-packages for convenience.
@@ -158,11 +158,18 @@ func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOp
 		outputDir = c.registry.ModelDir(modelID)
 	}
 
-	src := &apiFileSource{
-		client:  c.api,
-		modelID: modelID,
-		file:    filename,
+	// Resolve size + hash from the tree listing — the single authority. (HEAD
+	// reports size 0 for non-LFS git files, which yields a 0-byte download.)
+	files, err := c.api.ListFiles(ctx, modelID)
+	if err != nil {
+		return nil, err
 	}
+	size, sha256, ok := fileMeta(files, filename)
+	if !ok {
+		return nil, fmt.Errorf("file %q not found in %s", filename, modelID)
+	}
+
+	src := source.New(c.api, modelID, filename, size, sha256)
 
 	streams := opts.Streams
 	if streams <= 0 {
@@ -179,8 +186,6 @@ func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOp
 		return nil, err
 	}
 
-	// Get file size for registry.
-	size, _, _ := c.api.HeadFile(ctx, modelID, filename)
 	quant := gguf.ParseQuantFromFilename(filename)
 
 	lf := registry.LocalFile{
@@ -204,17 +209,16 @@ func (c *Client) Registry() *registry.Registry {
 	return c.registry
 }
 
-// apiFileSource adapts the API client to the download.FileSource interface.
-type apiFileSource struct {
-	client  *api.Client
-	modelID string
-	file    string
-}
-
-func (s *apiFileSource) Head(ctx context.Context) (int64, string, error) {
-	return s.client.HeadFile(ctx, s.modelID, s.file)
-}
-
-func (s *apiFileSource) Download(ctx context.Context, offset int64) (io.ReadCloser, int64, error) {
-	return s.client.DownloadFile(ctx, s.modelID, s.file, offset)
+// fileMeta finds a file in a tree listing and returns its authoritative size
+// and content hash (LFS content SHA256, or empty for non-LFS git files).
+func fileMeta(files []ModelFile, filename string) (size int64, sha256 string, ok bool) {
+	for _, f := range files {
+		if f.Filename == filename {
+			if f.LFS != nil {
+				return f.LFS.Size, f.LFS.OID, true
+			}
+			return f.Size, "", true
+		}
+	}
+	return 0, "", false
 }
