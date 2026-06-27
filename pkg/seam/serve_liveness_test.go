@@ -2,6 +2,8 @@ package seam
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lazypower/spark-tools/pkg/llmserve"
@@ -34,13 +36,22 @@ func (s *seamRuntime) ListManaged(context.Context) ([]runtime.ServiceState, erro
 }
 
 func TestSeam_EmitLabels_ProtectArtifact(t *testing.T) {
-	// What BuildPlan produces for a real instance.
+	// Real (resolvable) artifact dirs — canonicalization is filesystem-based.
+	models := t.TempDir()
+	coder := filepath.Join(models, "Coder")
+	other := filepath.Join(models, "SomethingElse")
+	for _, d := range []string{coder, other} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	plan, _, err := llmserve.BuildPlan(llmserve.PlanRequest{
 		Name:        "coder-next",
-		Facts:       serving.ArtifactFacts{ModelID: "Qwen/Coder", ModelPath: "/srv/models/Coder", Arch: "Qwen3MoeForCausalLM", Tokenizer: serving.TokenizerQwen, Quant: serving.QuantNVFP4},
+		Facts:       serving.ArtifactFacts{ModelID: "Qwen/Coder", ModelPath: coder, Arch: "Qwen3MoeForCausalLM", Tokenizer: serving.TokenizerQwen, Quant: serving.QuantNVFP4},
 		Image:       "vllm/vllm-openai@v0.23.0",
 		Accelerator: "nvidia:gb10:sm121",
-		Mounts:      []llmserve.Mount{{Host: "/srv/models", Container: "/models/hf"}},
+		Mounts:      []llmserve.Mount{{Host: models, Container: "/models/hf"}},
 		WatchdogDir: "/wd",
 	})
 	if err != nil {
@@ -49,9 +60,8 @@ func TestSeam_EmitLabels_ProtectArtifact(t *testing.T) {
 
 	// The labels emit stamps carry the host artifact path.
 	labels := lifecycle.IdentityLabels(plan.Desired)
-	host := labels[lifecycle.LabelArtifactHostPath]
-	if host != "/srv/models/Coder" {
-		t.Fatalf("SEAM: emit must stamp the host artifact path, got %q", host)
+	if labels[lifecycle.LabelArtifactHostPath] != coder {
+		t.Fatalf("SEAM: emit must stamp the host artifact path, got %q", labels[lifecycle.LabelArtifactHostPath])
 	}
 
 	// A running container with those exact labels must make liveness protect the
@@ -60,10 +70,10 @@ func TestSeam_EmitLabels_ProtectArtifact(t *testing.T) {
 	container := runtime.ServiceState{Name: "coder-next", Running: true, Labels: labels}
 	lv := liveness.New(instance.NewStore(t.TempDir()), &seamRuntime{managed: []runtime.ServiceState{container}})
 
-	if !lv.IsProtected(context.Background(), "/srv/models/Coder") {
+	if !lv.IsProtected(context.Background(), coder) {
 		t.Error("SEAM CONTRACT BROKEN: a running emitted container must protect its host artifact dir")
 	}
-	if lv.IsProtected(context.Background(), "/srv/models/SomethingElse") {
+	if lv.IsProtected(context.Background(), other) {
 		t.Error("an unrelated artifact must stay evictable")
 	}
 }

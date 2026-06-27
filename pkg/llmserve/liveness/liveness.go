@@ -42,23 +42,35 @@ type Report struct {
 	Reason       string
 }
 
-// Canonical reduces a host path to the single key both this authority and a
-// consumer compare on: resolve symlinks (when the path exists), absolutize, and
-// clean. Done at query time on BOTH the recorded paths and the candidate, so they
-// reflect the same filesystem state. Never fails — a missing path falls back to
-// abs+clean of the input, which is still stable across both sides.
-func Canonical(path string) string {
+// canonicalize reduces a host path to the single key both this authority and a
+// consumer compare on: resolve symlinks, absolutize, clean. resolved is false
+// when EvalSymlinks fails (the path does not exist / is unreadable) — in which
+// case the key is only a best-effort abs+clean of the INPUT, which can desync
+// from a consumer that holds the resolved target. A recorded path that does not
+// resolve is therefore a DOUBT and must fail closed, not silently mis-key.
+func canonicalize(path string) (key string, resolved bool) {
 	if path == "" {
-		return ""
+		return "", false
 	}
 	p := path
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		p = resolved
+	resolved = true
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	} else {
+		resolved = false
 	}
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
-	return filepath.Clean(p)
+	return filepath.Clean(p), resolved
+}
+
+// Canonical is the best-effort comparison key (resolves symlinks when possible).
+// Exposed for diagnostics; the protected-set logic uses canonicalize's resolved
+// flag to fail closed on an unresolvable recorded path.
+func Canonical(path string) string {
+	k, _ := canonicalize(path)
+	return k
 }
 
 // Protected computes the protected-artifact set: the union of every desired
@@ -76,9 +88,18 @@ func (l *Liveness) Protected(ctx context.Context) Report {
 		return Report{AllProtected: true, Reason: "manifest read error: " + err.Error()}
 	}
 	for i := range manifests {
-		if dir := manifests[i].Desired.ModelDir; dir != "" {
-			r.Protected[Canonical(dir)] = true
+		dir := manifests[i].Desired.ModelDir
+		if dir == "" {
+			continue
 		}
+		key, ok := canonicalize(dir)
+		if !ok {
+			// Cannot resolve a recorded artifact path → cannot compare it safely to
+			// a consumer's candidate → fail closed.
+			return Report{AllProtected: true,
+				Reason: "desired manifest model dir does not resolve (" + dir + "); cannot compare safely"}
+		}
+		r.Protected[key] = true
 	}
 
 	// Live half: every running managed container protects the artifact it serves,
@@ -98,7 +119,12 @@ func (l *Liveness) Protected(ctx context.Context) Report {
 			return Report{AllProtected: true,
 				Reason: "a running managed container has no " + lifecycle.LabelArtifactHostPath + " label; cannot determine its artifact"}
 		}
-		r.Protected[Canonical(host)] = true
+		key, ok := canonicalize(host)
+		if !ok {
+			return Report{AllProtected: true,
+				Reason: "a running managed container's artifact path does not resolve (" + host + ")"}
+		}
+		r.Protected[key] = true
 	}
 	return r
 }
@@ -112,10 +138,11 @@ func (l *Liveness) IsProtected(ctx context.Context, artifactPath string) bool {
 	if r.AllProtected {
 		return true
 	}
-	if artifactPath == "" {
-		return true
+	key, ok := canonicalize(artifactPath)
+	if artifactPath == "" || !ok {
+		return true // can't evaluate the candidate → protect (fail closed)
 	}
-	return r.Protected[Canonical(artifactPath)]
+	return r.Protected[key]
 }
 
 // ProtectedArtifacts returns the sorted canonical keys of protected artifacts, and
@@ -157,6 +184,11 @@ func (l *Liveness) Instance(ctx context.Context, name string) (InstanceLiveness,
 		return out, err
 	}
 
+	// The set-level report is the authority: if it is fail-closed (AllProtected),
+	// THIS instance is protected too, regardless of its own running/manifest state
+	// — otherwise the per-instance verdict could contradict the authority.
+	report := l.Protected(ctx)
+
 	containers, err := l.Runtime.ListManaged(ctx)
 	if err != nil {
 		out.Protected = true // fail-closed
@@ -169,14 +201,12 @@ func (l *Liveness) Instance(ctx context.Context, name string) (InstanceLiveness,
 			break
 		}
 	}
-	out.Protected = out.HasManifest || out.Running
-	if out.Protected && out.Reason == "" {
-		out.Reason = protectReason(out)
-	}
+	out.Protected = out.HasManifest || out.Running || report.AllProtected
+	out.Reason = instanceReason(out, report)
 	return out, nil
 }
 
-func protectReason(l InstanceLiveness) string {
+func instanceReason(l InstanceLiveness, report Report) string {
 	switch {
 	case l.Running && l.HasManifest:
 		return "running and desired"
@@ -184,6 +214,8 @@ func protectReason(l InstanceLiveness) string {
 		return "running (no manifest — orphan stack)"
 	case l.HasManifest:
 		return "desired (manifest present; not currently running)"
+	case report.AllProtected:
+		return "fail-closed: " + report.Reason
 	default:
 		return "not protected"
 	}
