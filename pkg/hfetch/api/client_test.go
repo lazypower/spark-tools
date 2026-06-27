@@ -152,6 +152,37 @@ func TestListFiles(t *testing.T) {
 	}
 }
 
+// HuggingFace paginates large trees via a Link: rel="next" header. ListFiles
+// must follow it so a file on a later page is not silently dropped.
+func TestListFiles_FollowsPagination(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("cursor") {
+		case "":
+			w.Header().Set("Link", "<"+srv.URL+"/api/models/org/model/tree/main?recursive=true&cursor=p2>; rel=\"next\"")
+			json.NewEncoder(w).Encode([]ModelFile{{Type: "file", Filename: "page1.gguf", Size: 1}})
+		case "p2":
+			json.NewEncoder(w).Encode([]ModelFile{{Type: "file", Filename: "page2.gguf", Size: 2}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := NewClient(WithBaseURL(srv.URL), WithToken("t"))
+
+	files, err := client.ListFiles(context.Background(), "org/model")
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[f.Filename] = true
+	}
+	if !got["page1.gguf"] || !got["page2.gguf"] {
+		t.Errorf("pagination not followed; got %v", got)
+	}
+}
+
 func TestGatedModel(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

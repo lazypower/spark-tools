@@ -184,34 +184,65 @@ func (c *Client) GetModel(ctx context.Context, modelID string) (*Model, error) {
 	return &model, nil
 }
 
-// ListFiles lists files in a model repository. It uses recursive mode
-// to include files inside subdirectories (e.g. bartowski's per-quant
-// folders for large split models).
+// ListFiles lists files in a model repository. It uses recursive mode to
+// include files inside subdirectories (e.g. bartowski's per-quant folders for
+// large split models), and follows the HuggingFace tree endpoint's
+// Link: rel="next" pagination so the result is the COMPLETE file set — callers
+// (the vLLM profile, the completeness gate, library Pull) treat it as the
+// authority, so a truncated listing would wrongly drop or reject real files.
 func (c *Client) ListFiles(ctx context.Context, modelID string) ([]ModelFile, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, c.apiBase+"/models/"+modelID+"/tree/main?recursive=true", nil)
-	if err != nil {
-		return nil, err
-	}
+	url := c.apiBase + "/models/" + modelID + "/tree/main?recursive=true"
 
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var raw []ModelFile
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decoding file list response: %w", err)
-	}
-
-	// Filter out directory entries — callers only care about files.
-	files := make([]ModelFile, 0, len(raw))
-	for _, f := range raw {
-		if f.Type != "directory" {
-			files = append(files, f)
+	var files []ModelFile
+	for url != "" {
+		req, err := c.newRequest(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
 		}
+		resp, err := c.do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		var raw []ModelFile
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("decoding file list response: %w", err)
+		}
+		next := nextLink(resp.Header.Get("Link"))
+		resp.Body.Close()
+
+		// Filter out directory entries — callers only care about files.
+		for _, f := range raw {
+			if f.Type != "directory" {
+				files = append(files, f)
+			}
+		}
+		url = next
 	}
 	return files, nil
+}
+
+// nextLink extracts the rel="next" target from an RFC 5988 Link header
+// (HuggingFace paginates the tree endpoint this way). Returns "" when absent.
+func nextLink(header string) string {
+	for part := range strings.SplitSeq(header, ",") {
+		segs := strings.Split(part, ";")
+		if len(segs) < 2 {
+			continue
+		}
+		target := strings.TrimSpace(segs[0])
+		if !strings.HasPrefix(target, "<") || !strings.HasSuffix(target, ">") {
+			continue
+		}
+		for _, param := range segs[1:] {
+			p := strings.TrimSpace(param)
+			if p == `rel="next"` || p == "rel=next" {
+				return target[1 : len(target)-1]
+			}
+		}
+	}
+	return ""
 }
 
 // HeadFile performs a HEAD request to get file size and hash without downloading.

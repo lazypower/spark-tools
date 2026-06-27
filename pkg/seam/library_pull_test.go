@@ -76,6 +76,56 @@ func TestSeam_LibraryPull_NonLFS_UsesTreeListingNotHead(t *testing.T) {
 	}
 }
 
+// CONTRACT: library Pull must find a file that lives on a later page of a
+// paginated tree listing. Before ListFiles paginated, Pull treated the first
+// page as the complete authority and falsely rejected real files on page 2.
+//
+// STATUS: GREEN — guards the pagination fix.
+func TestSeam_LibraryPull_FindsFileOnSecondPage(t *testing.T) {
+	const body = "{\"x\":1}"
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/tree/main") && r.URL.Query().Get("cursor") == "":
+			w.Header().Set("Link", "<"+srv.URL+"/api/models/org/model/tree/main?recursive=true&cursor=p2>; rel=\"next\"")
+			io.WriteString(w, `[{"type":"file","path":"other.gguf","size":1,"oid":"`+strings.Repeat("a", 40)+`"}]`)
+		case strings.Contains(r.URL.Path, "/tree/main"):
+			io.WriteString(w, `[{"type":"file","path":"config.json","size":`+itoa(len(body))+`,"oid":"`+strings.Repeat("b", 40)+`"}]`)
+		case strings.HasSuffix(r.URL.Path, "/resolve/main/config.json"):
+			io.WriteString(w, body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HFETCH_HOME", home)
+	t.Setenv("HFETCH_DATA_DIR", filepath.Join(home, "data"))
+	t.Setenv("HFETCH_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("HFETCH_CACHE_DIR", filepath.Join(home, "cache"))
+
+	client, err := hfetch.NewClient(hfetch.WithBaseURL(srv.URL), hfetch.WithToken("t"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if _, err := client.Pull(context.Background(), "org/model", "config.json", hfetch.PullOptions{OutputDir: out}); err != nil {
+		t.Fatalf("Pull of a file on page 2 must succeed, got: %v", err)
+	}
+	st, err := os.Stat(filepath.Join(out, "config.json"))
+	if err != nil || st.Size() != int64(len(body)) {
+		t.Errorf("expected %d-byte file from page 2, got size=%d err=%v", len(body), fileSize(st), err)
+	}
+}
+
+func fileSize(fi os.FileInfo) int64 {
+	if fi == nil {
+		return -1
+	}
+	return fi.Size()
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
