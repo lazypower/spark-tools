@@ -252,9 +252,11 @@ func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reco
 		if rec.Status == StatusConflict {
 			return rec
 		}
-		// Fail fast on a crash: the engine container exists but is not running.
-		if o.engineExited(ctx, d) {
-			return Reconciled{StatusNotServing, "engine container exited during startup (crash, not a slow load)"}
+		// Fail fast on a crash — including a crash LOOP. A container crash-looping
+		// under restart:unless-stopped is never "exited" (it keeps restarting), so
+		// a climbing restart count is the signal, not a not-running snapshot.
+		if crashed, reason := o.engineCrashed(ctx, d); crashed {
+			return Reconciled{StatusNotServing, reason}
 		}
 		if time.Now().After(deadline) {
 			return Reconciled{StatusNotServing, fmt.Sprintf("not serving within the %s ceiling: %s", o.bootTimeout(), rec.Reason)}
@@ -267,21 +269,33 @@ func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reco
 	}
 }
 
-// engineExited reports whether the engine container is present but NOT running —
-// a crash, distinct from a still-loading (running) container. Absent/unknown is
-// NOT treated as exited (a created container appears momentarily; let the ceiling
-// handle a genuinely-vanished stack rather than fail on an inspect race).
-func (o *Orchestrator) engineExited(ctx context.Context, d instance.Desired) bool {
+// crashLoopRestarts is how many restarts of the engine during a bring-up count as
+// a crash loop (a clean load restarts zero times; this tolerates a transient
+// blip). The watchdog cannot cause these: it only restarts AFTER /health passes,
+// which a bring-up has by definition not yet reached — so a restart during the
+// serving wait is unambiguously a crash.
+const crashLoopRestarts = 3
+
+// engineCrashed reports whether the engine has crashed during the bring-up —
+// either a climbing restart count (a crash loop under restart:unless-stopped) or
+// a terminally not-running container. Absent/unknown is NOT a crash (a created
+// container appears momentarily; let the ceiling handle a vanished stack rather
+// than fail on an inspect race).
+func (o *Orchestrator) engineCrashed(ctx context.Context, d instance.Desired) (bool, string) {
 	state, err := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath)
 	if err != nil || !state.Exists {
-		return false
+		return false, ""
 	}
 	for _, svc := range state.Services {
-		if svc.Labels[composeServiceLabel] == "vllm" {
-			return !svc.Running
+		if svc.Labels[composeServiceLabel] != "vllm" {
+			continue
 		}
+		if svc.RestartCount >= crashLoopRestarts {
+			return true, fmt.Sprintf("engine crash-looped during startup (%d restarts) — not a slow load", svc.RestartCount)
+		}
+		return false, "" // running or briefly down between restarts — still loading
 	}
-	return false
+	return false, ""
 }
 
 // Down tears an instance down. Confirmed teardown removes the manifest; an

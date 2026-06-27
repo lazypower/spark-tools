@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -155,7 +156,15 @@ func parseMounts(mounts []string) ([]emit.Mount, error) {
 		if !ok || host == "" || container == "" {
 			return nil, fmt.Errorf("invalid --mount %q, want host:container", m)
 		}
-		out = append(out, emit.Mount{Host: host, Container: container})
+		// Resolve the host path against the operator's cwd HERE, while it is still
+		// authoritative. The emitted spec is stored and run from elsewhere (XDG
+		// state), so a relative host path would otherwise resolve against the
+		// wrong directory.
+		absHost, err := filepath.Abs(host)
+		if err != nil {
+			return nil, fmt.Errorf("resolving --mount host %q: %w", host, err)
+		}
+		out = append(out, emit.Mount{Host: absHost, Container: container})
 	}
 	return out, nil
 }

@@ -77,6 +77,29 @@ func TestBuildPlan_LabelsMatchReconcileDefinition(t *testing.T) {
 	}
 }
 
+func TestBuildPlan_ResolvesRelativeMountToAbsolute(t *testing.T) {
+	// Operator P1: a relative --mount baked into a spec that's stored+run from XDG
+	// state would resolve against the spec's dir, not the caller's cwd → wrong
+	// (empty) mount → crash loop. Host paths must be absolute in the emitted spec.
+	plan, _, err := BuildPlan(PlanRequest{
+		Name:        "qwen",
+		Facts:       qwenFacts(),
+		Image:       "vllm/vllm-openai@v0.23.0",
+		Accelerator: "nvidia:gb10:sm121",
+		Mounts:      []emit.Mount{{Host: "./models", Container: "/models/hf"}},
+		WatchdogDir: "wd",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plan.Spec, "- ./models:/models/hf:ro") {
+		t.Errorf("relative mount host must be resolved to absolute in the spec\n---\n%s", plan.Spec)
+	}
+	if !strings.Contains(plan.Spec, ":/models/hf:ro") || !strings.Contains(plan.Spec, "/models:/models/hf:ro") {
+		t.Errorf("expected an absolute host path mounted to /models/hf\n---\n%s", plan.Spec)
+	}
+}
+
 func TestBuildPlan_RejectsBadName(t *testing.T) {
 	_, _, err := BuildPlan(PlanRequest{Name: "../escape", Facts: qwenFacts(), Image: "img", Accelerator: "a"})
 	if err == nil {

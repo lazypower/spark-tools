@@ -2,6 +2,7 @@ package llmserve
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
@@ -46,13 +47,37 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 		port = 8000
 	}
 
+	// Resolve all host paths to ABSOLUTE at emit. The emitted spec is persisted
+	// under XDG state and run by `docker compose` from THAT directory — a
+	// caller-cwd-relative mount (e.g. ./models) would resolve against the spec's
+	// dir, not the operator's cwd, and silently mount the wrong (empty) path. A
+	// persisted, relocated spec must be self-contained.
+	facts := req.Facts
+	if facts.ModelPath != "" {
+		abs, err := filepath.Abs(facts.ModelPath)
+		if err != nil {
+			return lifecycle.Plan{}, nil, fmt.Errorf("resolving model dir to absolute: %w", err)
+		}
+		facts.ModelPath = abs
+	}
+	mounts, err := absoluteMounts(req.Mounts)
+	if err != nil {
+		return lifecycle.Plan{}, nil, err
+	}
+	watchdogDir := req.WatchdogDir
+	if watchdogDir != "" {
+		if watchdogDir, err = filepath.Abs(watchdogDir); err != nil {
+			return lifecycle.Plan{}, nil, fmt.Errorf("resolving watchdog dir to absolute: %w", err)
+		}
+	}
+
 	creq := contract.Request{
 		ServedName:   served,
 		Capabilities: req.Capabilities,
 		ContextLen:   req.ContextLen,
 		Target:       fingerprint.Fingerprint{Engine: req.Image, Accelerator: req.Accelerator},
 	}
-	resolved, err := contract.Resolve(creq, req.Facts)
+	resolved, err := contract.Resolve(creq, facts)
 	if err != nil {
 		return lifecycle.Plan{}, nil, err
 	}
@@ -61,9 +86,9 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 	desired := instance.Desired{
 		Name:          req.Name,
 		ServedName:    served,
-		ModelID:       req.Facts.ModelID,
-		ModelRevision: req.Facts.Revision,
-		ModelDir:      req.Facts.ModelPath,
+		ModelID:       facts.ModelID,
+		ModelRevision: facts.Revision,
+		ModelDir:      facts.ModelPath,
 		ContractKey:   resolved.Key,
 		Target:        fingerprint.Fingerprint{Engine: req.Image, Accelerator: req.Accelerator},
 		ProjectName:   project,
@@ -75,10 +100,10 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 	host := emit.Host{
 		Image:   imageRef(req.Image),
 		Port:    port,
-		Volumes: req.Mounts,
+		Volumes: mounts,
 	}
-	if req.WatchdogDir != "" {
-		host.Watchdog = &emit.Watchdog{ScriptHostDir: req.WatchdogDir, Project: project}
+	if watchdogDir != "" {
+		host.Watchdog = &emit.Watchdog{ScriptHostDir: watchdogDir, Project: project}
 	}
 	desired.SpecHash = emit.SpecHash(resolved, host)
 
@@ -90,6 +115,21 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 	}
 
 	return lifecycle.Plan{Desired: desired, Spec: spec}, resolved, nil
+}
+
+// absoluteMounts resolves each mount's HOST path to absolute (its container path
+// is already absolute). This is what makes the persisted spec self-contained: a
+// relative host path would otherwise resolve against the spec's storage dir.
+func absoluteMounts(in []emit.Mount) ([]emit.Mount, error) {
+	out := make([]emit.Mount, len(in))
+	for i, m := range in {
+		abs, err := filepath.Abs(m.Host)
+		if err != nil {
+			return nil, fmt.Errorf("resolving mount host %q to absolute: %w", m.Host, err)
+		}
+		out[i] = emit.Mount{Host: abs, Container: m.Container}
+	}
+	return out, nil
 }
 
 // imageRef converts a fingerprint-style engine ref (image@tag) into a runnable

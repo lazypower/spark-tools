@@ -90,8 +90,9 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 			continue
 		}
 		var ins struct {
-			Name  string `json:"Name"`
-			State struct {
+			Name         string `json:"Name"`
+			RestartCount int    `json:"RestartCount"`
+			State        struct {
 				Running bool `json:"Running"`
 			} `json:"State"`
 			Config struct {
@@ -102,9 +103,10 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 			return RuntimeState{}, fmt.Errorf("parsing docker inspect: %w", err)
 		}
 		st.Services = append(st.Services, ServiceState{
-			Name:    strings.TrimPrefix(ins.Name, "/"),
-			Running: ins.State.Running,
-			Labels:  ins.Config.Labels,
+			Name:         strings.TrimPrefix(ins.Name, "/"),
+			Running:      ins.State.Running,
+			RestartCount: ins.RestartCount,
+			Labels:       ins.Config.Labels,
 		})
 	}
 	return st, nil

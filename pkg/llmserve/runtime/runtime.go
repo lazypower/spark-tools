@@ -18,6 +18,11 @@ type ServiceState struct {
 	Name string
 	// Running is true when the container is up (not exited/created/dead).
 	Running bool
+	// RestartCount is how many times the runtime has restarted this container. A
+	// container crash-looping under `restart: unless-stopped` is never "exited"
+	// (it keeps coming back), so a climbing count — not a not-running snapshot — is
+	// the reliable crash signal during a bring-up.
+	RestartCount int
 	// Labels are the container's labels (the identity stamp emit applied).
 	Labels map[string]string
 }
