@@ -14,23 +14,38 @@ hfetch ──▶ llm-run ──▶ llm-bench
 
 ## hfetch
 
-HuggingFace Hub client purpose-built for GGUF workflows. Search, download, inspect, and import models without touching Python.
+HuggingFace Hub client for GGUF *and* serve-ready safetensors workflows. Search, download, inspect, verify, and import models without touching Python.
 
 ```sh
 hfetch search "qwen coder" --gguf          # Find GGUF models on the Hub
 hfetch pull bartowski/Qwen2.5-Coder-32B-Instruct-GGUF --quant Q4_K_M
 hfetch bartowski/Qwen2.5-Coder-32B-Instruct-GGUF      # Interactive picker
-hfetch info deepseek-ai/DeepSeek-R1 --files             # Inspect model metadata
+hfetch info nvidia/Qwen3.6-35B-A3B-NVFP4               # Shows quant format before you pull
 hfetch ollama-import bartowski/Llama-3-8B-GGUF:Q4_K_M   # One-shot Ollama import
 ```
 
 **Highlights:**
 - GGUF-first file picker with quantization labels, bits-per-weight, and VRAM fit estimation
+- **Serve-ready `vllm` profile** — pulls the complete safetensors fileset (all shards + configs + tokenizer + quant metadata + trust-remote-code `.py`) and refuses to leave a partial model on disk
+- **Completeness gate** — every required file is verified present + size + hash (LFS SHA256 or git-blob SHA1); a missing or corrupt file is a named, non-zero-exit failure, never a silent partial
+- **`hfetch verify`** — re-check a downloaded model against canonical HuggingFace hashes with no re-download (cron-able bitrot sweep via `--all`)
+- **Quant-aware `info`** — reports NVFP4 / FP8 / GPTQ / compressed-tensors and KV-cache FP8 from the config, before you download
 - Resumable parallel downloads (4 concurrent streams, HTTP Range)
 - Automatic split-shard detection and pure Go GGUF merging
 - Ollama import with template family auto-detection (Llama 3, ChatML, Phi-3, DeepSeek, Gemma, Mistral, and more)
 - Local model registry with offline listing, path lookup, and garbage collection
 - Token resolution: `--token` flag > `HFETCH_TOKEN` env > config file > HF CLI compat
+
+**Serve-ready safetensors (vLLM):**
+
+```sh
+hfetch pull nvidia/Qwen3.6-35B-A3B-NVFP4 --dest vllm   # Complete set → flat ~/.../vllm/models/<name>, gate-checked
+hfetch pull org/model --profile vllm --output ./models/m  # Same, into a dir you choose
+hfetch verify org/model                                 # Re-hash a model vs upstream (no re-download)
+hfetch verify --all                                     # Sweep every downloaded model for bitrot
+```
+
+A `--dest vllm` (or `--profile vllm`) pull lands files flat for vLLM to mount and exits non-zero naming any missing/corrupt file — the completeness gate is the `preflight_check` you don't have to write.
 
 ```sh
 hfetch login                  # Store HF token (shared across all tools)
