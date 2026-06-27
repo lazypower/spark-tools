@@ -28,6 +28,9 @@ func rootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(emitCmd(), profilesCmd(), targetsCmd())
+	root.AddCommand(
+		emitCmd(), profilesCmd(), targetsCmd(),
+		upCmd(), downCmd(), statusCmd(), recoverCmd(), forgetCmd(),
+	)
 	return root
 }
