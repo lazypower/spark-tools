@@ -1,12 +1,12 @@
-package instance
+package serveinstance
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 func sample(name string) Instance {

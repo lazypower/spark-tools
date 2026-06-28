@@ -438,7 +438,12 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
 - Infra: `version`, `progress`, `tui`, `ui`, `paths` (mechanism), `tidymanifest`.
 - Pure-leaf domain: `modelmeta`, `fileset`, `gguf`.
 - State: `modelstore` (← pkg/hfetch/registry).
-- Serve foundation: `fingerprint` (← pkg/llmserve/fingerprint).
+- Serve foundation: `fingerprint` (← pkg/llmserve/fingerprint),
+  `serving` (← pkg/llmserve/serving — the pure-leaf serving-contract vocabulary:
+  Capability/QuantMethod/TokenizerFamily/ArtifactFacts/ContractKey, ModeLabel),
+  `serveinstance` (← pkg/llmserve/instance — the atomic per-instance manifest store;
+  package renamed instance→serveinstance; repointed onto internal/{fingerprint,serving};
+  ErrNotFound sentinel preserved by identity in the wrapper).
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
@@ -450,9 +455,10 @@ NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
      have it pass Dirs().Config down). Behavior-sensitive — do under codex.
    - `hardware` couples to pkg/llmrun/engine (RunConfig); extract after/with engine
      to avoid a temporary cross-layer import.
-2. State: `serveinstance` (llmserve/instance), `inventory`, `reconcile` (both
-   llmtidy; now depend on the already-internal modelstore + tidymanifest, so
-   relatively clean next picks).
+2. State: `inventory`, `reconcile` (both llmtidy; now depend on the
+   already-internal modelstore + tidymanifest, so relatively clean next picks).
+   (`serveinstance` DONE — note: instance depended on the serving vocab + fingerprint,
+   not on modelstore/tidymanifest; serving was extracted first to unblock it.)
 3. Network/host-bound (ISOLATE BEHIND INJECTABLE INTERFACES FIRST): `hub`
    (hfetch/api), `download`, `ollama`, `openaiapi`, `llamacpp` (llmrun/engine),
    `servehost` (llmserve/runtime+lifecycle; already has Runtime/Prober ifaces),
