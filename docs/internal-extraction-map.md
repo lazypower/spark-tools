@@ -450,7 +450,11 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   `download` (← pkg/hfetch/download — the resumable chunked downloader: range fallback,
   rate limiting, disk-space checks, resumable ChunkState, SHA-256 verify; stdlib-only,
   zero intra-repo deps, byte-identical move incl. the build-tagged diskspace_{unix,
-  windows}.go; ErrRangeNotSupported sentinel preserved by identity).
+  windows}.go; ErrRangeNotSupported sentinel preserved by identity),
+  `openaiapi` (← pkg/llmrun/api — the OpenAI-compatible llama-server HTTP client:
+  health, model list, chat/completion, SSE streaming, api-key; stdlib-only, zero
+  intra-repo deps; package renamed api→openaiapi to disambiguate from hfetch/api;
+  already injectable via WithHTTPClient/NewClient(baseURL), httptest-covered).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync

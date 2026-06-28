@@ -1,6 +1,6 @@
-// Package api provides a Go HTTP client for llama-server's
+// Package openaiapi provides a Go HTTP client for llama-server's
 // OpenAI-compatible /v1/* endpoints.
-package api
+package openaiapi
 
 // ChatCompletionRequest represents an OpenAI-compatible chat completion request.
 type ChatCompletionRequest struct {
