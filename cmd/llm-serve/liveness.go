@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/pkg/llmserve"
+	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 )
 
 func livenessCmd() *cobra.Command {
@@ -49,17 +51,18 @@ func livenessCmd() *cobra.Command {
 				return nil
 			}
 
-			keys, all := lv.ProtectedArtifacts(ctx)
-			if all {
-				fmt.Fprintln(out, "protected: ALL (fail-closed: liveness could not be fully determined)")
+			report := lv.Protected(ctx)
+			printUnmanaged(cmd.ErrOrStderr(), report)
+			if report.AllProtected {
+				fmt.Fprintf(out, "protected: ALL (fail-closed: %s)\n", report.Reason)
 				return nil
 			}
-			if len(keys) == 0 {
+			if len(report.Protected) == 0 {
 				fmt.Fprintln(out, "no protected artifacts (nothing managed is running or desired)")
 				return nil
 			}
 			fmt.Fprintln(out, "protected artifacts:")
-			for _, k := range keys {
+			for _, k := range sortedKeys(report.Protected) {
 				fmt.Fprintf(out, "  %s\n", k)
 			}
 			return nil
@@ -67,4 +70,22 @@ func livenessCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&protectedOnly, "protected-artifacts", false, "print only the protected artifact paths (one per line, machine-readable)")
 	return cmd
+}
+
+// printUnmanaged warns about unlabeled running containers that bind-mount host
+// dirs — the coexistence signal a pruner (llm-tidy) must not silently work around.
+func printUnmanaged(w interface{ Write([]byte) (int, error) }, r liveness.Report) {
+	for _, um := range r.Unmanaged {
+		fmt.Fprintf(w, "warning: unmanaged container %q bind-mounts %v — pruning under these paths is blocked; label or migrate it to llm-serve\n",
+			um.Container, um.Mounts)
+	}
+}
+
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

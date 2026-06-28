@@ -36,11 +36,23 @@ func New(store *instance.Store, rt runtime.Runtime) *Liveness {
 // Report is the protected-artifact set for one query. AllProtected ⇒ the query
 // could not be fully evaluated (fail-closed) and EVERY artifact must be treated
 // as protected; Protected is the explicit set otherwise. Reason explains a
-// fail-closed verdict.
+// fail-closed verdict. Unmanaged lists running containers that are NOT
+// llm-serve-managed but bind-mount host dirs — a consumer (llm-tidy) should
+// COMPLAIN about these: an unlabeled container is using the filesystem and we
+// cannot reason precisely about what it serves, so pruning under its mounts is
+// blocked. Label or migrate it.
 type Report struct {
 	Protected    map[string]bool
 	AllProtected bool
 	Reason       string
+	Unmanaged    []UnmanagedMount
+}
+
+// UnmanagedMount is a running non-llm-serve container with bind mounts: the
+// coexistence signal (run.sh / Ollama / hand-launched) a consumer complains about.
+type UnmanagedMount struct {
+	Container string
+	Mounts    []string // canonical host paths
 }
 
 // canonicalize reduces a host path to the single key both this authority and a
@@ -113,6 +125,9 @@ func (l *Liveness) Protected(ctx context.Context) Report {
 			continue // ListRunning should pre-filter, but never protect on a dead container
 		}
 		if c.Labels[lifecycle.LabelManagedBy] == lifecycle.ManagedByValue {
+			// Labeled (managed) → trust the label: protect the PRECISE artifact, so
+			// B3 can still prune other unused models. (Operator decision: a label
+			// applied is reasonable to trust.)
 			host := c.Labels[lifecycle.LabelArtifactHostPath]
 			if host == "" {
 				return Report{AllProtected: true,
@@ -123,12 +138,24 @@ func (l *Liveness) Protected(ctx context.Context) Report {
 			}
 			continue
 		}
-		// Foreign container: protect each bind-mount source.
-		for _, src := range c.Mounts {
-			if !l.addRoot(&r, src) {
-				return r
-			}
+		// Unlabeled container WITH bind mounts → we can't know what it serves, so
+		// protect everything under its mounts AND record it so a consumer
+		// complains. (Operator decision: unlabeled + a mount ⇒ no model under it is
+		// safe to remove.) An unlabeled container with no bind mounts is irrelevant.
+		if len(c.Mounts) == 0 {
+			continue
 		}
+		um := UnmanagedMount{Container: c.Name}
+		for _, src := range c.Mounts {
+			key, ok := canonicalize(src)
+			if !ok {
+				return Report{AllProtected: true,
+					Reason: "an unlabeled running container's mount does not resolve (" + src + ")"}
+			}
+			r.Protected[key] = true
+			um.Mounts = append(um.Mounts, key)
+		}
+		r.Unmanaged = append(r.Unmanaged, um)
 	}
 	return r
 }

@@ -133,14 +133,24 @@ func TestProtected_ForeignContainerMount_CoexistenceGuard(t *testing.T) {
 	if err := os.MkdirAll(served, 0755); err != nil {
 		t.Fatal(err)
 	}
-	l := New(storeWith(t, nil), &fakeRuntime{managed: []runtime.ServiceState{
-		foreignContainer("vllm-runsh", models), // mounts the parent
-	}})
-	if !l.IsProtected(context.Background(), served) {
-		t.Error("an artifact under a foreign container's mount must be protected (coexistence)")
+	other := filepath.Join(models, "AnotherModel")
+	if err := os.MkdirAll(other, 0755); err != nil {
+		t.Fatal(err)
 	}
-	if !l.IsProtected(context.Background(), models) {
-		t.Error("the mounted dir itself must be protected")
+	l := New(storeWith(t, nil), &fakeRuntime{managed: []runtime.ServiceState{
+		foreignContainer("vllm-runsh", models), // mounts the whole models store
+	}})
+	// Every model under the unlabeled mount is LOCKED — no introspection of which
+	// one is loaded.
+	for _, p := range []string{served, other, models} {
+		if !l.IsProtected(context.Background(), p) {
+			t.Errorf("%s under an unlabeled container's models mount must be locked", p)
+		}
+	}
+	// And the unmanaged container is surfaced so llm-tidy can complain.
+	report := l.Protected(context.Background())
+	if len(report.Unmanaged) != 1 || report.Unmanaged[0].Container != "vllm-runsh" {
+		t.Errorf("an unlabeled mounted container must be reported as unmanaged, got %+v", report.Unmanaged)
 	}
 }
 
