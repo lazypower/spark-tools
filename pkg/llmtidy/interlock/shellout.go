@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -11,8 +12,17 @@ import (
 // LLMServeChecker is a Checker backed by `llm-serve liveness --check`: it pipes
 // the candidate paths to the binary's stdin and reads the protected subset from
 // stdout (the overlap is computed by llm-serve — the one authority), and the
-// complaint warnings from stderr. bin defaults to "llm-serve" on PATH.
+// complaint warnings from stderr.
+//
+// Resolving the binary: an explicit bin arg wins; else $LLM_SERVE_BIN; else
+// "llm-serve" on PATH. The env override matters because llm-serve is often
+// installed somewhere not on a non-interactive/cron PATH (e.g. ~/.local/bin) —
+// without it, the interlock would mistake "not on PATH" for "not installed" and
+// go inactive (fail-open). With LLM_SERVE_BIN set, "absent" means genuinely absent.
 func LLMServeChecker(bin string) Checker {
+	if bin == "" {
+		bin = os.Getenv("LLM_SERVE_BIN")
+	}
 	if bin == "" {
 		bin = "llm-serve"
 	}
