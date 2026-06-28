@@ -1,12 +1,12 @@
-package contract
+package servecontract
 
 import (
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // matchingTarget is the same environment the v1 profiles were authored against,

@@ -1,4 +1,4 @@
-// Package contract resolves a serve request against the arch profiles into a
+// Package servecontract resolves a serve request against the arch profiles into a
 // validated vLLM launch spec: it realizes requested capabilities as backend
 // flags, rejects incompatible combinations (the negative-compat rules), and
 // stamps the contract key. This is the (A) contract engine — the value-density
@@ -6,7 +6,7 @@
 // a compose/docker-run/quadlet spec is the emit driver's job, and launching it
 // is v2 (B). Resolution is a pure function of (request, artifact facts), so it
 // is fully unit-testable off the GPU.
-package contract
+package servecontract
 
 import (
 	"errors"
@@ -15,9 +15,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serveprofiles"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // Request is a launch request: a model (resolved to verified artifact facts by
@@ -107,7 +107,7 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	}
 
 	// 1. Arch profile must exist — an unknown arch has no validated contract.
-	profile, ok := profiles.Lookup(facts.Arch)
+	profile, ok := serveprofiles.Lookup(facts.Arch)
 	if !ok {
 		return nil, &RejectionError{
 			Rule:   "unknown-arch",
@@ -117,7 +117,7 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	}
 
 	// 2. Quant method must be known — an unknown method might silently load wrong.
-	quantFlags, ok := profiles.QuantFlagsFor(facts.Quant)
+	quantFlags, ok := serveprofiles.QuantFlagsFor(facts.Quant)
 	if !ok {
 		return nil, &RejectionError{
 			Rule:   "unknown-quant",
@@ -138,8 +138,8 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	}
 
 	// 4. Negative-compat rules — reject footgun combinations.
-	creq := profiles.CompatRequest{Capabilities: req.Capabilities, Facts: facts, Profile: profile}
-	for _, rule := range profiles.CompatRules {
+	creq := serveprofiles.CompatRequest{Capabilities: req.Capabilities, Facts: facts, Profile: profile}
+	for _, rule := range serveprofiles.CompatRules {
 		if bad, reason := rule.Violated(creq); bad {
 			return nil, &RejectionError{Rule: rule.Name, Reason: reason, Remedy: rule.Remedy}
 		}
@@ -185,7 +185,7 @@ func stalenessWarning(arch string, stamped fingerprint.Fingerprint, drift []stri
 // assembleFlags builds the ordered vLLM flag list from the validated request.
 // Order mirrors the working oracle's compose command so an emitted spec reads
 // like the hand-rolled one it replaces.
-func assembleFlags(req Request, facts serving.ArtifactFacts, profile profiles.ArchProfile, quantFlags []string) []string {
+func assembleFlags(req Request, facts serving.ArtifactFacts, profile serveprofiles.ArchProfile, quantFlags []string) []string {
 	wants := func(c serving.Capability) bool {
 		return slices.Contains(req.Capabilities, c)
 	}

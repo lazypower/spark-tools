@@ -455,9 +455,14 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
 - Serve-contract tier (pure): `serveprofiles` (← pkg/llmserve/profiles — the serving
   architecture-profile registry, QuantFlags table, and negative-compat CompatRules;
   package renamed profiles→serveprofiles to disambiguate from llm-run's profiles;
-  repointed onto internal/{serving,fingerprint}). Its dependents `contract`→`emit` are
-  the natural next picks (both pure; artifact/runtime/lifecycle/liveness stay deferred
-  — they pull in hfetch/api network + the Docker runtime).
+  repointed onto internal/{serving,fingerprint}),
+  `servecontract` (← pkg/llmserve/contract — the Resolve contract engine: realizes
+  capabilities into validated/ordered vLLM flags, rejects incompatible combos, stamps
+  the contract key; package renamed contract→servecontract; repointed onto
+  internal/{serving,fingerprint,serveprofiles}; a user-facing RejectionError.Remedy
+  string literal was preserved byte-identical past the profiles→serveprofiles sed).
+  Remaining pure piece: `emit` (→ servespec). artifact/runtime/lifecycle/liveness stay
+  deferred — they pull in hfetch/api network + the Docker runtime.
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
