@@ -1,11 +1,11 @@
-package emit
+package servespec
 
 import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
+	"github.com/lazypower/spark-tools/internal/servecontract"
 )
 
 // TestCompose_RoundTrips parses the emitted compose with a real YAML parser and
@@ -15,7 +15,7 @@ import (
 // round-trip catches exactly that — the silent "emitted spec launches with
 // different args than validated" failure.
 func TestCompose_RoundTrips(t *testing.T) {
-	r := &contract.Resolved{
+	r := &servecontract.Resolved{
 		Flags: []string{
 			"--model", "/srv/models/Qwen3.6-35B-A3B-NVFP4",
 			"--served-model-name", "qwen-36b-fp4",

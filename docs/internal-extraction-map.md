@@ -460,9 +460,13 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   capabilities into validated/ordered vLLM flags, rejects incompatible combos, stamps
   the contract key; package renamed contract→servecontract; repointed onto
   internal/{serving,fingerprint,serveprofiles}; a user-facing RejectionError.Remedy
-  string literal was preserved byte-identical past the profiles→serveprofiles sed).
-  Remaining pure piece: `emit` (→ servespec). artifact/runtime/lifecycle/liveness stay
-  deferred — they pull in hfetch/api network + the Docker runtime.
+  string literal was preserved byte-identical past the profiles→serveprofiles sed),
+  `servespec` (← pkg/llmserve/emit — the compose/docker-run/quadlet render driver +
+  SpecHash + the embedded watchdog.sh; package renamed emit→servespec; the embed asset
+  was git-mv'd alongside emit.go so //go:embed still resolves; repointed
+  contract→internal/servecontract). The pure serve-contract/spec tier is now fully
+  internal. Still deferred (host-bound / network): `artifact` (hfetch/api), `runtime`
+  (Docker/Compose shell-out), `lifecycle` + `liveness` (Orchestrator over runtime).
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
