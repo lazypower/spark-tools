@@ -464,6 +464,11 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   INTERNAL consumer internal/fileset off the pkg wrapper directly onto internal/hub
   (api.→hub. qualifier swap onto the same aliased ModelFile type), removing fileset's
   documented internal→pkg layering smell; cmd/* and pkg/* consumers stay on the wrapper).
+- hfetch fetch chain: `hubsource` (← pkg/hfetch/source — the single Hub-backed
+  download.FileSource adapter: Head returns injected tree-listing metadata with no
+  network call, Download translates hub.IsRangeNotSupported into the download
+  ErrRangeNotSupported sentinel; package renamed source→hubsource; repointed
+  api→internal/hub + download→internal/download).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync

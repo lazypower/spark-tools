@@ -4,21 +4,26 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
+	hs "github.com/lazypower/spark-tools/internal/hubsource"
 )
 
-// Head must return the size/hash injected from the tree listing, never a
-// network HEAD — otherwise non-LFS files get size 0 (a 0-byte download). The
-// client base URL points nowhere; if Head dialed out, this would error.
-func TestFile_HeadUsesInjectedMetadata(t *testing.T) {
-	s := New(api.NewClient(api.WithBaseURL("http://127.0.0.1:0"), api.WithToken("t")),
-		"org/model", "config.json", 1234, "")
+// The behavior suite (Head uses injected metadata, Download range-fallback
+// translation) lives in internal/hubsource; this locks the compat surface (alias
+// identity + method ride-along, delegated constructor).
 
-	size, sha, err := s.Head(context.Background())
+func TestWrapper_AliasIdentity(t *testing.T) {
+	var _ *hs.File = (*File)(nil)
+}
+
+func TestWrapper_NewAndHead(t *testing.T) {
+	c := hub.NewClient()
+	f := New(c, "org/model", "config.json", 42, "deadbeef")
+	size, sha, err := f.Head(context.Background())
 	if err != nil {
-		t.Fatalf("Head should not error (no network): %v", err)
+		t.Fatalf("Head: %v", err)
 	}
-	if size != 1234 || sha != "" {
-		t.Errorf("Head should echo injected tree metadata, got size=%d sha=%q", size, sha)
+	if size != 42 || sha != "deadbeef" {
+		t.Errorf("Head must return injected metadata, got size=%d sha=%q", size, sha)
 	}
 }
