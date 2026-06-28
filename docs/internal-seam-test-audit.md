@@ -597,6 +597,20 @@ behavior stays uncovered, and the future integration test that should cover it.
   authority) — at which point the parity gap closes by construction. Future: a
   CLI integration test once `newAPIClient` accepts a base-URL seam or delegates.
 
+- **`cmd/llm-run` inference/serve/chat flows.** Why: `runInference`, `serve`,
+  `run`, and `raw` call `engine.Launch` (spawns a long-lived llama.cpp process,
+  PID/log files, signals), `chat` runs a bubbletea TUI, `explain effective` and
+  the model/profile/alias listings print via `fmt.Print` to os.Stdout, and they
+  build a real `Engine` (llama.cpp detection). Covered hermetically: the facade
+  `pkg/llmrun` end to end (NewEngine via stub binaries, ResolveModel of a local
+  path, BuildCommand/Recommend re-exports — the llm-bench import surface, 0% →
+  78.4%), plus `scanLocalModels` (org--repo mapping, non-gguf skip, missing-dir),
+  the local `formatSize` (no-KB-tier variant), `applyDefaults` (the flag-
+  precedence-over-recommendation seam), and `gpuName`. Uncovered: process launch,
+  the chat TUI, and stdout-printing command glue. Future: an injected
+  launcher/prober seam (audit `internal/inference` + `internal/process`) so the
+  high-level flows can run against fakes, and a build-tagged real-`Launch` test.
+
 ## Overall Test Readiness
 
 Ready to extract with low risk:
