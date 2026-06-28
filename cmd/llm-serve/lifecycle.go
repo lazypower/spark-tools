@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/paths"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 )
@@ -16,14 +17,12 @@ import (
 // dirs resolves the XDG state layout: manifests, emitted specs, and the watchdog
 // script all live under one root, overridable via LLM_SERVE_HOME.
 func dirs() (stateDir, specDir, watchdogDir string) {
+	// POLICY (llm-serve-owned): LLM_SERVE_HOME overrides; the state root is an
+	// XDG_STATE_HOME app dir; specs/ and watchdog/ live under the root. Only the
+	// XDG-state arithmetic is delegated to the shared mechanism.
 	root := os.Getenv("LLM_SERVE_HOME")
 	if root == "" {
-		base := os.Getenv("XDG_STATE_HOME")
-		if base == "" {
-			home, _ := os.UserHomeDir()
-			base = filepath.Join(home, ".local", "state")
-		}
-		root = filepath.Join(base, "llm-serve")
+		root = paths.XDGState("llm-serve")
 	}
 	return root, filepath.Join(root, "specs"), filepath.Join(root, "watchdog")
 }

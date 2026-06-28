@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/lazypower/spark-tools/internal/paths"
 )
 
 const appName = "llm-run"
@@ -24,9 +26,9 @@ type DirConfig struct {
 //  3. XDG defaults (lowest priority)
 func Dirs() DirConfig {
 	d := DirConfig{
-		Config: xdgConfig(),
-		Data:   xdgData(),
-		Cache:  xdgCache(),
+		Config: paths.XDGConfig(appName),
+		Data:   paths.XDGData(appName),
+		Cache:  paths.XDGCache(appName),
 	}
 
 	if home := os.Getenv("LLM_RUN_HOME"); home != "" {
@@ -100,26 +102,6 @@ func SaveGlobalConfig(cfg GlobalConfig) error {
 	return os.WriteFile(filepath.Join(dirs.Config, "config.json"), data, 0644)
 }
 
-func xdgConfig() string {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", appName)
-}
-
-func xdgData() string {
-	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", appName)
-}
-
-func xdgCache() string {
-	if v := os.Getenv("XDG_CACHE_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".cache", appName)
-}
+// XDG base resolution now delegates to internal/paths (the shared mechanism).
+// llm-run retains its own POLICY above: the LLM_RUN_HOME remap and the
+// individual LLM_RUN_*_DIR overrides.

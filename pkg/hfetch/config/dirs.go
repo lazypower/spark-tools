@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/lazypower/spark-tools/internal/paths"
 )
 
 const appName = "hfetch"
@@ -21,9 +23,9 @@ type DirConfig struct {
 //  3. XDG defaults (lowest priority)
 func Dirs() DirConfig {
 	d := DirConfig{
-		Config: xdgConfig(),
-		Data:   xdgData(),
-		Cache:  xdgCache(),
+		Config: paths.XDGConfig(appName),
+		Data:   paths.XDGData(appName),
+		Cache:  paths.XDGCache(appName),
 	}
 
 	// HFETCH_HOME remaps all three as a convenience.
@@ -47,26 +49,6 @@ func Dirs() DirConfig {
 	return d
 }
 
-func xdgConfig() string {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", appName)
-}
-
-func xdgData() string {
-	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", appName)
-}
-
-func xdgCache() string {
-	if v := os.Getenv("XDG_CACHE_HOME"); v != "" {
-		return filepath.Join(v, appName)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".cache", appName)
-}
+// XDG base resolution now delegates to internal/paths (the shared mechanism).
+// hfetch retains its own POLICY above: the HFETCH_HOME remap and the individual
+// HFETCH_*_DIR overrides.

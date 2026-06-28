@@ -380,3 +380,41 @@ where a duplicate authority was discovered, it was documented rather than merged
   (consumers: `cmd/llm-tidy`, `internal/ui`); 100% statement coverage. No move
   needed. It is the canonical size/speed/bar authority other tools should
   delegate to (llm-tidy and now hfetch do).
+
+## Phase 2 Extraction Log
+
+internal/paths — shared XDG/home MECHANISM extracted (no shared policy).
+
+### Moved (mechanism)
+
+- **`internal/paths`** now owns the duplicated XDG arithmetic: `Home()`
+  (best-effort), `XDGConfig/XDGData/XDGCache/XDGState(app)`. These reproduce the
+  exact prior behavior (env var wins; else home-joined canonical fallback; a ""
+  home yields relative paths via filepath.Join).
+
+### Delegated (policy stays tool-owned)
+
+- `pkg/hfetch/config.Dirs` — keeps HFETCH_HOME remap + HFETCH_*_DIR overrides;
+  XDG bases now call paths.XDG*. Local xdg* helpers deleted.
+- `pkg/llmrun/config.Dirs` — keeps LLM_RUN_HOME remap + LLM_RUN_*_DIR overrides;
+  XDG bases now call paths.XDG*. Local xdg* helpers deleted.
+- `cmd/llm-serve.dirs` — keeps LLM_SERVE_HOME override + specs/watchdog layout;
+  the state root now calls paths.XDGState("llm-serve").
+- Each tool's existing dir tests stay green, pinning behavior.
+
+### Path policies that remain tool-owned (NOT merged)
+
+- App names, env-var prefixes, the override precedence order, and the directory
+  SET each tool exposes (hfetch/llm-run: Config/Data/Cache triad; llm-serve:
+  state root + specs + watchdog) are policy and stay in each package.
+
+### Divergence intentionally preserved (NOT merged)
+
+- **llm-tidy home-error policy.** `internal/tidymanifest.ConfigDir` PROPAGATES a
+  home-resolution error ("cannot resolve user home directory"); hfetch/llm-run/
+  llm-serve degrade best-effort to "". Per the hard rule, llm-tidy keeps its own
+  ConfigDir/Resolve (it calls os.UserHomeDir directly, not paths.Home) so its
+  observable behavior is unchanged. Reconcile later only if a global home-error
+  policy is intentionally chosen.
+- **llm-bench** (`pkg/llmbench/config.Dirs`) is out of the named phase-2 scope;
+  it still has its own copy and can delegate to internal/paths in a later pass.
