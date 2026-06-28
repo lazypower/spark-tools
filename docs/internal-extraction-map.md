@@ -427,7 +427,9 @@ well-tested packages; behavior preserved; pkg/* kept as alias wrappers.
 ### Moved
 - **`internal/modelmeta`** ← `pkg/hfetch/quant` (ParseQuant/QuantInfo).
 - **`internal/fileset`** ← `pkg/hfetch/fileset` (Verify completeness gate +
-  SelectVLLM). Still imports `pkg/hfetch/api` (api not yet extracted).
+  SelectVLLM). Originally still imported `pkg/hfetch/api`; once `hub` was extracted
+  (api→internal/hub), fileset was repointed directly onto `internal/hub`, so it is
+  now fully internal with no pkg/* import.
 - **`internal/gguf`** ← `pkg/hfetch/gguf` (parse/filter/fit/merge/shard,
   ParseQuantFromFilename, QuantBitsPerWeight). Self-contained, 11 consumers
   shielded by a full alias wrapper.
@@ -454,7 +456,14 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   `openaiapi` (← pkg/llmrun/api — the OpenAI-compatible llama-server HTTP client:
   health, model list, chat/completion, SSE streaming, api-key; stdlib-only, zero
   intra-repo deps; package renamed api→openaiapi to disambiguate from hfetch/api;
-  already injectable via WithHTTPClient/NewClient(baseURL), httptest-covered).
+  already injectable via WithHTTPClient/NewClient(baseURL), httptest-covered),
+  `hub` (← pkg/hfetch/api — the HuggingFace Hub REST client: search, model metadata,
+  paginated tree listing, HEAD/range/download, retry/backoff, model-metadata cache;
+  package renamed api→hub to disambiguate from llm-run's api; imports only pkg/hfetch/
+  auth (accepted canonical-leaf cross-layer import). SAME iteration repointed the one
+  INTERNAL consumer internal/fileset off the pkg wrapper directly onto internal/hub
+  (api.→hub. qualifier swap onto the same aliased ModelFile type), removing fileset's
+  documented internal→pkg layering smell; cmd/* and pkg/* consumers stay on the wrapper).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync

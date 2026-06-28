@@ -5,13 +5,13 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
-func file(name string) api.ModelFile { return api.ModelFile{Type: "file", Filename: name} }
+func file(name string) hub.ModelFile { return hub.ModelFile{Type: "file", Filename: name} }
 
 func TestSelectVLLM_IncludesServeReadySet(t *testing.T) {
-	files := []api.ModelFile{
+	files := []hub.ModelFile{
 		file("model-00001-of-00002.safetensors"),
 		file("model-00002-of-00002.safetensors"),
 		file("model.safetensors.index.json"),
@@ -46,7 +46,7 @@ func TestSelectVLLM_IncludesServeReadySet(t *testing.T) {
 }
 
 func TestSelectVLLM_ExcludesJunk(t *testing.T) {
-	files := []api.ModelFile{
+	files := []hub.ModelFile{
 		file("model.safetensors"),
 		file("config.json"),
 		file("README.md"),
@@ -72,7 +72,7 @@ func TestSelectVLLM_ExcludesJunk(t *testing.T) {
 	}
 }
 
-func names(files []api.ModelFile) []string {
+func names(files []hub.ModelFile) []string {
 	out := make([]string, len(files))
 	for i, f := range files {
 		out[i] = f.Filename

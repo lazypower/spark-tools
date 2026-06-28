@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // Issue is one completeness problem with a named file and a human reason.
@@ -44,20 +44,20 @@ var tokenizerFiles = []string{
 }
 
 // Verify runs the completeness gate (spec §14.4) against an on-disk model.
-// repoFiles is the repo's file tree (from api.ListFiles, carrying canonical
+// repoFiles is the repo's file tree (from hub.ListFiles, carrying canonical
 // LFS hash + size); localDir is the flat directory the files were pulled into.
 //
 // It never returns an error for a merely-incomplete model — incompleteness is
 // reported via Report.HardFail so callers can name every problem at once. A
 // non-nil error means the gate itself could not run.
-func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
+func Verify(repoFiles []hub.ModelFile, localDir string) (*Report, error) {
 	rep := &Report{}
 
 	// repoByBase keys flat files by base name (weights/configs live at the
 	// root); repoByPath keys by full repo-relative path (needed for auto_map
 	// modules that may sit in a subdirectory).
-	repoByBase := make(map[string]api.ModelFile, len(repoFiles))
-	repoByPath := make(map[string]api.ModelFile, len(repoFiles))
+	repoByBase := make(map[string]hub.ModelFile, len(repoFiles))
+	repoByPath := make(map[string]hub.ModelFile, len(repoFiles))
 	var safetensors []string
 	for _, f := range repoFiles {
 		if f.Type == "directory" {
@@ -119,7 +119,7 @@ func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 //	                     MTP head are real and index-absent)
 //	index absent, one  → single-shard model (valid, e.g. Devstral)
 //	index absent, many → suspicious, hard-fail
-func verifyWeights(rep *Report, repoByBase map[string]api.ModelFile, safetensors []string, localDir string) {
+func verifyWeights(rep *Report, repoByBase map[string]hub.ModelFile, safetensors []string, localDir string) {
 	_, hasIndex := repoByBase[indexName]
 
 	required := map[string]bool{}
@@ -159,7 +159,7 @@ func verifyWeights(rep *Report, repoByBase map[string]api.ModelFile, safetensors
 }
 
 // checkRequired verifies one required flat (root-level) file by base name.
-func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, base string) {
+func checkRequired(rep *Report, repoByBase map[string]hub.ModelFile, localDir, base string) {
 	f, inRepo := repoByBase[base]
 	verifyFile(rep, f, inRepo, filepath.Join(localDir, base), base)
 }
@@ -169,7 +169,7 @@ func checkRequired(rep *Report, repoByBase map[string]api.ModelFile, localDir, b
 // files (oid is the content hash), git-blob SHA1 for non-LFS git files (oid is
 // the blob id). name is the display label. Each distinct failure appends a
 // named hard-fail Issue.
-func verifyFile(rep *Report, f api.ModelFile, inRepo bool, localPath, name string) {
+func verifyFile(rep *Report, f hub.ModelFile, inRepo bool, localPath, name string) {
 	if !inRepo {
 		rep.HardFail = append(rep.HardFail, Issue{name, "required file not in repo"})
 		return
@@ -287,7 +287,7 @@ func readWeightMap(indexPath string) ([]string, error) {
 // and intact, and the repo must ship at least one. Keying off the repo — not
 // local files — means a stale tokenizer left in a reused output dir can't
 // satisfy the requirement for a model whose repo supplied none.
-func verifyTokenizers(rep *Report, repoByBase map[string]api.ModelFile, localDir string) {
+func verifyTokenizers(rep *Report, repoByBase map[string]hub.ModelFile, localDir string) {
 	repoTokenizers := 0
 	for base := range repoByBase {
 		if isTokenizerFile(base) {

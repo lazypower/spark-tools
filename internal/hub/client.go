@@ -1,5 +1,5 @@
-// Package api implements the HuggingFace Hub REST API client.
-package api
+// Package hub implements the HuggingFace Hub REST API client.
+package hub
 
 import (
 	"context"

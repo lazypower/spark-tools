@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // gitBlob returns the git blob object id (SHA1) of content — the oid HF reports
@@ -23,40 +23,40 @@ func gitBlob(content string) string {
 
 // plainWithOID writes a non-LFS file and returns a ModelFile carrying its git
 // blob oid, as the repo tree listing would.
-func plainWithOID(t *testing.T, dir, name, content string) api.ModelFile {
+func plainWithOID(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content)), BlobID: gitBlob(content)}
+	return hub.ModelFile{Type: "file", Filename: name, Size: int64(len(content)), BlobID: gitBlob(content)}
 }
 
 // writeLocal writes content to dir/name and returns an LFS ModelFile whose
 // OID/Size match the bytes — i.e. a correctly-downloaded shard.
-func writeLocal(t *testing.T, dir, name, content string) api.ModelFile {
+func writeLocal(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(content))
-	return api.ModelFile{
+	return hub.ModelFile{
 		Type:     "file",
 		Filename: name,
-		LFS:      &api.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))},
+		LFS:      &hub.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))},
 	}
 }
 
 // plain writes a non-LFS file (config/tokenizer/py) and returns its ModelFile.
-func plain(t *testing.T, dir, name, content string) api.ModelFile {
+func plain(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
+	return hub.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
 }
 
-func indexFor(t *testing.T, dir string, shards ...string) api.ModelFile {
+func indexFor(t *testing.T, dir string, shards ...string) hub.ModelFile {
 	t.Helper()
 	wm := `{"weight_map":{`
 	for i, s := range shards {
@@ -71,7 +71,7 @@ func indexFor(t *testing.T, dir string, shards ...string) api.ModelFile {
 
 func TestVerify_MultiShard_Complete(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model-00001-of-00002.safetensors", "shard-one"),
 		writeLocal(t, dir, "model-00002-of-00002.safetensors", "shard-two"),
 		indexFor(t, dir, "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"),
@@ -93,9 +93,9 @@ func TestVerify_MissingShard_HardFailsNamed(t *testing.T) {
 	dir := t.TempDir()
 	good := writeLocal(t, dir, "model-00001-of-00002.safetensors", "shard-one")
 	// Second shard is in the repo + index but NOT written locally.
-	missing := api.ModelFile{Type: "file", Filename: "model-00002-of-00002.safetensors",
-		LFS: &api.LFS{OID: "deadbeef", Size: 9}}
-	repo := []api.ModelFile{
+	missing := hub.ModelFile{Type: "file", Filename: "model-00002-of-00002.safetensors",
+		LFS: &hub.LFS{OID: "deadbeef", Size: 9}}
+	repo := []hub.ModelFile{
 		good, missing,
 		indexFor(t, dir, "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"),
 		plain(t, dir, "config.json", `{}`),
@@ -112,7 +112,7 @@ func TestVerify_MissingShard_HardFailsNamed(t *testing.T) {
 
 func TestVerify_SingleShard_NoIndex_Valid(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "the-whole-thing"),
 		plain(t, dir, "config.json", `{}`),
 		plain(t, dir, "tokenizer.json", `{}`),
@@ -127,7 +127,7 @@ func TestVerify_SingleShard_NoIndex_Valid(t *testing.T) {
 
 func TestVerify_MultiShard_NoIndex_Suspicious(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model-a.safetensors", "a"),
 		writeLocal(t, dir, "model-b.safetensors", "b"),
 		plain(t, dir, "config.json", `{}`),
@@ -141,7 +141,7 @@ func TestVerify_MultiShard_NoIndex_Suspicious(t *testing.T) {
 
 func TestVerify_QuantConfigInRepoButMissingLocally_HardFails(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "w"),
 		plain(t, dir, "config.json", `{}`),
 		plain(t, dir, "tokenizer.json", `{}`),
@@ -156,7 +156,7 @@ func TestVerify_QuantConfigInRepoButMissingLocally_HardFails(t *testing.T) {
 
 func TestVerify_AutoMapModuleMissing_HardFails(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "w"),
 		plain(t, dir, "config.json", `{"auto_map":{"AutoModelForCausalLM":"modeling_nemotron_h.NemotronHForCausalLM"}}`),
 		plain(t, dir, "tokenizer.json", `{}`),
@@ -173,8 +173,8 @@ func TestVerify_HashMismatch_HardFails(t *testing.T) {
 	// File on disk says "corrupt" but the repo OID is for "correct".
 	plain(t, dir, "model.safetensors", "corrupt")
 	sum := sha256.Sum256([]byte("correct"))
-	repo := []api.ModelFile{
-		{Type: "file", Filename: "model.safetensors", LFS: &api.LFS{OID: hex.EncodeToString(sum[:]), Size: 7}},
+	repo := []hub.ModelFile{
+		{Type: "file", Filename: "model.safetensors", LFS: &hub.LFS{OID: hex.EncodeToString(sum[:]), Size: 7}},
 		plain(t, dir, "config.json", `{}`),
 		plain(t, dir, "tokenizer.json", `{}`),
 	}
@@ -186,7 +186,7 @@ func TestVerify_HashMismatch_HardFails(t *testing.T) {
 
 func TestVerify_MissingChatTemplate_WarnsNotFails(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "w"),
 		plain(t, dir, "config.json", `{}`),
 		plain(t, dir, "tokenizer.json", `{}`),
@@ -204,7 +204,7 @@ func TestVerify_MissingChatTemplate_WarnsNotFails(t *testing.T) {
 
 func TestVerify_EmbeddedChatTemplate_NoWarn(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "w"),
 		plain(t, dir, "config.json", `{}`),
 		plain(t, dir, "tokenizer_config.json", `{"chat_template":"{{ messages }}"}`),
@@ -218,7 +218,7 @@ func TestVerify_EmbeddedChatTemplate_NoWarn(t *testing.T) {
 
 func TestVerify_NoTokenizer_HardFails(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "w"),
 		plain(t, dir, "config.json", `{}`),
 	}
@@ -230,7 +230,7 @@ func TestVerify_NoTokenizer_HardFails(t *testing.T) {
 
 func TestVerify_NonLFS_GitBlobMatch_Passes(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", `{"architectures":["X"]}`),
 		plainWithOID(t, dir, "tokenizer.json", `{"v":1}`),
@@ -250,7 +250,7 @@ func TestVerify_NonLFS_EmptyFile_HardFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), nil, 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		{Type: "file", Filename: "config.json", Size: 7, BlobID: gitBlob(`{"a":1}`)},
 		plainWithOID(t, dir, "tokenizer.json", `{}`),
@@ -267,7 +267,7 @@ func TestVerify_NonLFS_CorruptSameSize_HardFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("BBBBBBBB"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		{Type: "file", Filename: "config.json", Size: 8, BlobID: gitBlob("AAAAAAAA")},
 		plainWithOID(t, dir, "tokenizer.json", `{}`),
@@ -284,7 +284,7 @@ func TestVerify_CorruptTokenizer_HardFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tokenizer.json"), []byte("BBBB"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", `{}`),
 		{Type: "file", Filename: "tokenizer.json", Size: 4, BlobID: gitBlob("AAAA")}, // same size, different content
@@ -300,7 +300,7 @@ func TestVerify_AutoMapArrayValue_StillChecksModules(t *testing.T) {
 	// silently skip every module assertion.
 	dir := t.TempDir()
 	cfg := `{"auto_map":{"AutoModelForCausalLM":"modeling_x.XForCausalLM","AutoTokenizer":["tokenization_x.Fast",null]}}`
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", cfg),
 		plainWithOID(t, dir, "tokenizer.json", `{}`),
@@ -321,7 +321,7 @@ func TestVerify_AutoMapModuleCorrupt_HardFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "modeling_x.py"), []byte("BBBB"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", cfg),
 		plainWithOID(t, dir, "tokenizer.json", `{}`),
@@ -340,7 +340,7 @@ func TestVerify_StaleTokenizerNotInRepo_HardFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "tokenizer.json"), []byte("stale from another model"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{ // repo has NO tokenizer file
+	repo := []hub.ModelFile{ // repo has NO tokenizer file
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", `{}`),
 	}
@@ -359,7 +359,7 @@ func TestVerify_SubdirAutoMapModule_FailsClosedWhenFlattened(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "modeling_x.py"), []byte("code"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", cfg),
 		plainWithOID(t, dir, "tokenizer.json", `{}`),
@@ -376,7 +376,7 @@ func TestVerify_ExternalAutoMapRepo_NotRequiredLocally(t *testing.T) {
 	// ANOTHER repo. It must NOT be required as a local file (false fail).
 	dir := t.TempDir()
 	cfg := `{"auto_map":{"AutoModelForCausalLM":"other-org/code-repo--modeling_x.XForCausalLM"}}`
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeLocal(t, dir, "model.safetensors", "weights"),
 		plainWithOID(t, dir, "config.json", cfg),
 		plainWithOID(t, dir, "tokenizer.json", `{}`),

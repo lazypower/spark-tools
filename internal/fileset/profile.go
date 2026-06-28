@@ -13,7 +13,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // Profile names a fileset selector.
@@ -83,8 +83,8 @@ var vllmExclude = []string{
 // SelectVLLM returns the subset of repo files the vLLM serve-ready profile must
 // fetch. Directory entries are ignored (ListFiles already drops them, but we
 // guard regardless).
-func SelectVLLM(files []api.ModelFile) []api.ModelFile {
-	var out []api.ModelFile
+func SelectVLLM(files []hub.ModelFile) []hub.ModelFile {
+	var out []hub.ModelFile
 	for _, f := range files {
 		if f.Type == "directory" {
 			continue
