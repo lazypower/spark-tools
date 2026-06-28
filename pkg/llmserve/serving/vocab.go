@@ -130,6 +130,20 @@ type ContractKey struct {
 	HWFingerprint string          `json:"hw_fingerprint"`
 }
 
+// Canonical renders the contract key as a stable string — used as the
+// `contract-key` runtime identity label so a lifecycle reconcile can prove a
+// running stack was launched for this exact validated contract.
+func (k ContractKey) Canonical() string {
+	return strings.Join([]string{
+		"arch=" + k.Arch,
+		"tok=" + string(k.Tokenizer),
+		"quant=" + string(k.Quant),
+		"mode=" + k.Mode,
+		"engine=" + k.EngineDigest,
+		"hw=" + k.HWFingerprint,
+	}, ";")
+}
+
 // ModeLabel renders a capability set as a stable, order-independent string for
 // the contract key's Mode field (so {Thinking,Vision} and {Vision,Thinking}
 // key identically). Empty set renders as "base".

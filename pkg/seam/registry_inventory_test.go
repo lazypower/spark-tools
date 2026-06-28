@@ -52,3 +52,39 @@ func TestSeam_RegistryVLLMEntry_NotSurfacedAsGGUF(t *testing.T) {
 		}
 	}
 }
+
+// Seam complement: the same registry vLLM entry MUST be surfaced by the vLLM
+// inventory (the B3-teeth slice) — one row at model-directory granularity, so
+// llm-tidy can prune it and the eviction interlock can protect the served path.
+func TestSeam_RegistryVLLMEntry_SurfacedAsVLLM(t *testing.T) {
+	reg := registry.New(t.TempDir())
+	if err := reg.Load(); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "nvidia/Qwen3.6-35B-A3B-NVFP4"
+	for _, f := range []string{
+		"model-00001-of-00002.safetensors",
+		"model-00002-of-00002.safetensors",
+		"config.json",
+		"tokenizer.json",
+	} {
+		reg.AddFile(repo, registry.LocalFile{Filename: f, Complete: true, LocalPath: "/srv/models/Qwen/" + f, Size: 1})
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	models, err := inventory.VLLMList(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("a registry safetensors model must surface as exactly one vLLM row, got %d", len(models))
+	}
+	if models[0].Backend != inventory.BackendVLLM || models[0].Repo != repo {
+		t.Errorf("wrong vLLM row: %+v", models[0])
+	}
+	if models[0].Path != "/srv/models/Qwen" {
+		t.Errorf("Path must be the model dir (the interlock keys on it), got %q", models[0].Path)
+	}
+}

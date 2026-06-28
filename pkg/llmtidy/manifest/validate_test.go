@@ -8,7 +8,7 @@ import (
 func TestValidateAcceptsGood(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
-		Ollama: []OllamaModelSpec{{Name: "qwen2.5-coder:32b"}, {Name: "llama3.3"}},
+		Ollama:  []OllamaModelSpec{{Name: "qwen2.5-coder:32b"}, {Name: "llama3.3"}},
 		GGUF: []GGUFModelSpec{
 			{Repo: "unsloth/Qwen3.5-122B-A10B-GGUF", Quant: "Q4_K_M"},
 			{Repo: "unsloth/Qwen3.5-122B-A10B-GGUF", Quant: "Q5_K_M"},

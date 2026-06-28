@@ -81,6 +81,10 @@ func runStatus(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory
 		renderBackend(w, "GGUF Models", inventory.BackendGGUF, d, avail.GGUF, now)
 		fmt.Fprintln(w)
 	}
+	if b == inventory.BackendUnknown || b == inventory.BackendVLLM {
+		renderBackend(w, "vLLM Models", inventory.BackendVLLM, d, avail.VLLM, now)
+		fmt.Fprintln(w)
+	}
 
 	if hasMissing(d) {
 		fmt.Fprintln(w, styleHeader.Render("MISSING"))
@@ -141,6 +145,7 @@ func hasMissing(d reconcile.DiffResult) bool { return len(d.Missing) > 0 }
 type statusJSON struct {
 	Ollama    sideJSON      `json:"ollama"`
 	GGUF      sideJSON      `json:"gguf"`
+	VLLM      sideJSON      `json:"vllm"`
 	Missing   []missingJSON `json:"missing"`
 	Available availJSON     `json:"available"`
 	Note      string        `json:"note,omitempty"`
@@ -169,11 +174,12 @@ type missingJSON struct {
 type availJSON struct {
 	Ollama bool `json:"ollama"`
 	GGUF   bool `json:"gguf"`
+	VLLM   bool `json:"vllm"`
 }
 
 func emitStatusJSON(w io.Writer, d reconcile.DiffResult, avail inventory.Available, invErr error) error {
 	out := statusJSON{
-		Available: availJSON{Ollama: avail.Ollama, GGUF: avail.GGUF},
+		Available: availJSON{Ollama: avail.Ollama, GGUF: avail.GGUF, VLLM: avail.VLLM},
 	}
 	if invErr != nil {
 		out.Note = invErr.Error()
@@ -186,6 +192,8 @@ func emitStatusJSON(w io.Writer, d reconcile.DiffResult, avail inventory.Availab
 			out.Ollama.Blessed = append(out.Ollama.Blessed, j)
 		case inventory.BackendGGUF:
 			out.GGUF.Blessed = append(out.GGUF.Blessed, j)
+		case inventory.BackendVLLM:
+			out.VLLM.Blessed = append(out.VLLM.Blessed, j)
 		}
 	}
 	for _, m := range d.Untracked {
@@ -195,6 +203,8 @@ func emitStatusJSON(w io.Writer, d reconcile.DiffResult, avail inventory.Availab
 			out.Ollama.Untracked = append(out.Ollama.Untracked, j)
 		case inventory.BackendGGUF:
 			out.GGUF.Untracked = append(out.GGUF.Untracked, j)
+		case inventory.BackendVLLM:
+			out.VLLM.Untracked = append(out.VLLM.Untracked, j)
 		}
 	}
 	for _, s := range d.Missing {
@@ -202,6 +212,9 @@ func emitStatusJSON(w io.Writer, d reconcile.DiffResult, avail inventory.Availab
 		if s.GGUF != nil {
 			mj.Repo = s.GGUF.Repo
 			mj.Quant = s.GGUF.Quant
+		}
+		if s.VLLM != nil {
+			mj.Repo = s.VLLM.Repo
 		}
 		out.Missing = append(out.Missing, mj)
 	}

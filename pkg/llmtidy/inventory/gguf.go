@@ -36,6 +36,7 @@ func GGUFList(r *registry.Registry) ([]InstalledModel, error) {
 				Repo:     lm.ID,
 				Quant:    f.Quantization,
 				Filename: f.Filename,
+				Path:     f.LocalPath,
 			})
 		}
 	}

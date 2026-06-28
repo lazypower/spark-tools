@@ -98,6 +98,12 @@ func Sync(
 			err = s.PullGGUF(ctx, spec.GGUF.Repo, spec.GGUF.Quant, func(line string) {
 				emit(line, nil)
 			})
+		case inventory.BackendVLLM:
+			// vLLM pull (the full safetensors fileset) is not yet wired into sync;
+			// skip rather than fail so a vllm: manifest entry doesn't break sync.
+			// Pull manually with `hfetch pull --dest vllm` for now.
+			emit("skipped (vLLM sync not yet supported; use hfetch pull --dest vllm)", nil)
+			continue
 		default:
 			err = fmt.Errorf("unsupported backend %v", spec.Backend)
 		}

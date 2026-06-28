@@ -10,11 +10,18 @@
 package llmserve
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
 	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
+	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
+	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
+	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
@@ -31,6 +38,13 @@ type (
 	Host          = emit.Host
 	Mount         = emit.Mount
 	Target        = emit.Target
+
+	// B1 lifecycle re-exports.
+	Orchestrator    = lifecycle.Orchestrator
+	LifecyclePlan   = lifecycle.Plan
+	LifecycleResult = lifecycle.Result
+	ServingStatus   = lifecycle.ServingStatus
+	InstanceStatus  = lifecycle.InstanceStatus
 )
 
 // Re-export the capability vocabulary.
@@ -77,3 +91,33 @@ func BuiltinProfiles() []profiles.ArchProfile { return profiles.BuiltinProfiles(
 
 // Targets returns the supported render targets.
 func Targets() []emit.Target { return emit.Targets() }
+
+// NewOrchestrator wires the B1 lifecycle over the real compose runtime and HTTP
+// prober, with manifests under stateDir and emitted specs under specDir.
+func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
+	return &lifecycle.Orchestrator{
+		Store:   instance.NewStore(stateDir),
+		Runtime: runtime.NewCompose(),
+		Prober:  runtime.NewHTTPProber(),
+		SpecDir: specDir,
+	}
+}
+
+// NewLiveness wires the B2 liveness authority over the manifest store and the
+// real compose runtime. It answers "is this artifact protected from eviction?"
+// for tools like llm-tidy — derived live, fail-closed.
+func NewLiveness(stateDir string) *liveness.Liveness {
+	return liveness.New(instance.NewStore(stateDir), runtime.NewCompose())
+}
+
+// EnsureWatchdogScript writes the embedded watchdog.sh into dir (idempotently) so
+// the emitted compose's /watchdog mount resolves. Returns the dir on success.
+func EnsureWatchdogScript(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "watchdog.sh"), []byte(emit.WatchdogScript), 0755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}

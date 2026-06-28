@@ -18,10 +18,10 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "llm-bench",
-		Short:   "LLM benchmark suite",
-		Long:    "llm-bench — declarative benchmarking for local LLMs on DGX Spark hardware.",
-		Version: version.Version,
+		Use:           "llm-bench",
+		Short:         "LLM benchmark suite",
+		Long:          "llm-bench — declarative benchmarking for local LLMs on DGX Spark hardware.",
+		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

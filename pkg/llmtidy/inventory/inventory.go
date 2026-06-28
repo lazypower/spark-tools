@@ -9,20 +9,23 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
 )
 
-// Provider exposes installed models across both backends.
+// Provider exposes installed models across every backend. GGUF and VLLM share
+// one hfetch registry (they are the same store, distinguished by file type).
 type Provider struct {
 	Ollama *ollama.Client
 	GGUF   *registry.Registry
+	VLLM   *registry.Registry
 }
 
 // Available reports per-backend availability after a Probe.
 type Available struct {
 	Ollama bool
 	GGUF   bool
+	VLLM   bool
 }
 
 // Probe checks which backends are reachable. Ollama is checked with a
-// short HTTP probe; GGUF is "available" if its registry can be loaded.
+// short HTTP probe; GGUF and VLLM are "available" if the registry can be loaded.
 func (p *Provider) Probe(ctx context.Context) Available {
 	a := Available{}
 	if p.Ollama != nil {
@@ -30,6 +33,9 @@ func (p *Provider) Probe(ctx context.Context) Available {
 	}
 	if p.GGUF != nil {
 		a.GGUF = p.GGUF.Load() == nil
+	}
+	if p.VLLM != nil {
+		a.VLLM = p.VLLM.Load() == nil
 	}
 	return a
 }
@@ -58,6 +64,14 @@ func (p *Provider) All(ctx context.Context) ([]InstalledModel, error) {
 			out = append(out, models...)
 		}
 	}
+	if p.VLLM != nil {
+		models, err := VLLMList(p.VLLM)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("vllm: %w", err))
+		} else {
+			out = append(out, models...)
+		}
+	}
 	return out, errors.Join(errs...)
 }
 
@@ -74,6 +88,11 @@ func (p *Provider) AllByBackend(ctx context.Context, b ModelBackend) ([]Installe
 			return nil, errors.New("gguf backend not configured")
 		}
 		return GGUFList(p.GGUF)
+	case BackendVLLM:
+		if p.VLLM == nil {
+			return nil, errors.New("vllm backend not configured")
+		}
+		return VLLMList(p.VLLM)
 	default:
 		return nil, fmt.Errorf("unsupported backend %v", b)
 	}
@@ -92,6 +111,11 @@ func (p *Provider) Delete(ctx context.Context, m InstalledModel) error {
 			return errors.New("gguf backend not configured")
 		}
 		return GGUFDelete(p.GGUF, m)
+	case BackendVLLM:
+		if p.VLLM == nil {
+			return errors.New("vllm backend not configured")
+		}
+		return VLLMDelete(p.VLLM, m)
 	default:
 		return fmt.Errorf("unsupported backend %v", m.Backend)
 	}

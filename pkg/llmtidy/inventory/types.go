@@ -14,6 +14,10 @@ const (
 	BackendUnknown ModelBackend = iota
 	BackendOllama
 	BackendGGUF
+	// BackendVLLM is an HF-format (safetensors) model directory served by vLLM —
+	// the same artifacts llm-serve manages. Pruning these is gated by the
+	// llm-serve eviction interlock.
+	BackendVLLM
 )
 
 // String returns the lower-case backend name used in CLI flags and output.
@@ -23,6 +27,8 @@ func (b ModelBackend) String() string {
 		return "ollama"
 	case BackendGGUF:
 		return "gguf"
+	case BackendVLLM:
+		return "vllm"
 	default:
 		return "unknown"
 	}
@@ -35,8 +41,10 @@ func ParseBackend(s string) (ModelBackend, error) {
 		return BackendOllama, nil
 	case "gguf":
 		return BackendGGUF, nil
+	case "vllm":
+		return BackendVLLM, nil
 	default:
-		return BackendUnknown, fmt.Errorf("unknown backend %q (want \"ollama\" or \"gguf\")", s)
+		return BackendUnknown, fmt.Errorf("unknown backend %q (want \"ollama\", \"gguf\", or \"vllm\")", s)
 	}
 }
 
@@ -68,4 +76,9 @@ type InstalledModel struct {
 	// Filename is the on-disk filename within the hfetch registry. Empty
 	// for Ollama.
 	Filename string
+
+	// Path is the on-disk host path of the model file/dir. Set for path-based
+	// backends (GGUF); EMPTY for Ollama, which is deleted via its own API by name
+	// and is governed by Ollama's runtime, not the llm-serve eviction interlock.
+	Path string
 }

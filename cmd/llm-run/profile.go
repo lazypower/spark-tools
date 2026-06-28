@@ -110,9 +110,9 @@ func profileSaveCmd() *cobra.Command {
 				Name:        args[0],
 				Description: desc,
 				Config: engine.RunConfig{
-					ModelRef:    model,
-					ContextSize: ctxSize,
-					Temperature: temp,
+					ModelRef:     model,
+					ContextSize:  ctxSize,
+					Temperature:  temp,
 					SystemPrompt: system,
 				},
 			}

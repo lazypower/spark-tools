@@ -136,6 +136,60 @@ func TestQuadlet_SingleExecLine(t *testing.T) {
 	}
 }
 
+func TestEmit_StampsIdentityLabels(t *testing.T) {
+	h := sampleHost()
+	h.Labels = map[string]string{
+		"managed-by":   "llm-serve",
+		"instance":     "qwen-coder",
+		"contract-key": "Qwen3MoeForCausalLM|qwen|nvfp4|tool-calling|eng|hw",
+		"spec-hash":    "deadbeef",
+	}
+	r := sampleResolved()
+	for name, out := range map[string]string{
+		"compose":    Compose(r, h),
+		"docker-run": DockerRun(r, h),
+		"quadlet":    Quadlet(r, h),
+	} {
+		if !strings.Contains(out, "managed-by=llm-serve") || !strings.Contains(out, "instance=qwen-coder") {
+			t.Errorf("%s: identity labels must be stamped on the stack\n---\n%s", name, out)
+		}
+	}
+}
+
+func TestEmit_LabelOrderDeterministic(t *testing.T) {
+	// The emitted spec (and thus its content hash) must not depend on map order.
+	h := sampleHost()
+	h.Labels = map[string]string{"z": "1", "a": "2", "m": "3", "managed-by": "llm-serve"}
+	first := Compose(sampleResolved(), h)
+	for range 20 {
+		if Compose(sampleResolved(), h) != first {
+			t.Fatal("compose output must be deterministic regardless of label map order")
+		}
+	}
+	// labels appear sorted by key
+	ia := strings.Index(first, "a=2")
+	im := strings.Index(first, "m=3")
+	iz := strings.Index(first, "z=1")
+	if !(ia < im && im < iz) {
+		t.Errorf("labels must render in sorted key order; got positions a=%d m=%d z=%d", ia, im, iz)
+	}
+}
+
+func TestCompose_NumericCommandValuesAreQuoted(t *testing.T) {
+	// Operator P1: docker compose requires every command entry to be a STRING. A
+	// bare numeric (--max-model-len 131072) is rejected. A lenient Go YAML parser
+	// coerces it (so a round-trip test misses this), so assert the raw rendering
+	// quotes it.
+	r := &contract.Resolved{Flags: []string{"--max-model-len", "131072", "--port-ish", "8000"}}
+	out := Compose(r, Host{Image: "img", Port: 8000})
+	if !strings.Contains(out, `- "131072"`) {
+		t.Errorf("numeric command value must be a quoted string, not bare\n---\n%s", out)
+	}
+	if strings.Contains(out, "- 131072\n") {
+		t.Errorf("bare numeric command value would be rejected by docker compose\n---\n%s", out)
+	}
+}
+
 func TestRender_UnknownTargetErrors(t *testing.T) {
 	if _, err := Render(Target("helm"), sampleResolved(), sampleHost()); err == nil {
 		t.Error("an unknown render target must error, not silently default")

@@ -13,6 +13,7 @@ import (
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
@@ -46,6 +47,7 @@ type config struct {
 	manifestPath string
 	ollamaHost   string
 	hfetchClient *hfetch.Client
+	checker      interlock.Checker
 }
 
 // WithManifestPath sets an explicit manifest path, overriding env/XDG.
@@ -59,6 +61,13 @@ func WithOllamaHost(host string) Option {
 }
 
 // WithHfetchClient injects an hfetch client; used in tests to avoid network.
+// WithChecker overrides the eviction-interlock liveness checker (default: shell
+// out to `llm-serve liveness`). Tests inject a fake; a consumer that runs no
+// llm-serve can disable it with a checker returning interlock.ErrLLMServeAbsent.
+func WithChecker(c interlock.Checker) Option {
+	return func(cfg *config) { cfg.checker = c }
+}
+
 func WithHfetchClient(client *hfetch.Client) Option {
 	return func(c *config) { c.hfetchClient = client }
 }
@@ -68,6 +77,7 @@ type Tidy struct {
 	manifestPath string
 	provider     *inventory.Provider
 	hfetch       *hfetch.Client
+	checker      interlock.Checker
 }
 
 // New builds a Tidy configured per the options.
@@ -92,10 +102,16 @@ func New(opts ...Option) (*Tidy, error) {
 	dirs := hfconfig.Dirs()
 	reg := registry.New(dirs.Data)
 
+	checker := cfg.checker
+	if checker == nil {
+		checker = interlock.LLMServeChecker("") // default: shell out to llm-serve
+	}
+
 	return &Tidy{
 		manifestPath: path,
-		provider:     &inventory.Provider{Ollama: oc, GGUF: reg},
+		provider:     &inventory.Provider{Ollama: oc, GGUF: reg, VLLM: reg},
 		hfetch:       cfg.hfetchClient,
+		checker:      checker,
 	}, nil
 }
 
@@ -166,6 +182,10 @@ func (t *Tidy) Prune(
 		}
 		plan = filtered
 	}
+	// Eviction interlock (B3): the gate lives HERE, at the deletion authority, so
+	// EVERY library prune is protected — not just the CLI. Protected (in-use)
+	// models are dropped from the plan; fail-closed if liveness can't be reached.
+	plan = interlock.Apply(ctx, plan, t.checker).Keep
 	return reconcile.Prune(ctx, t.provider, plan, nil)
 }
 
@@ -226,6 +246,14 @@ func (t *Tidy) Promote(ctx context.Context, model string, backend Backend) error
 			}
 		}
 		m.GGUF = append(m.GGUF, spec)
+	case inventory.BackendVLLM:
+		spec := manifest.VLLMModelSpec{Repo: match.Repo}
+		for _, existing := range m.VLLM {
+			if strings.EqualFold(existing.Repo, spec.Repo) {
+				return fmt.Errorf("vllm %s already in manifest", spec.Repo)
+			}
+		}
+		m.VLLM = append(m.VLLM, spec)
 	}
 
 	return t.SaveManifest(m)
@@ -257,6 +285,12 @@ func (t *Tidy) Demote(_ context.Context, model string) error {
 		m.GGUF = append(m.GGUF[:i], m.GGUF[i+1:]...)
 		return t.SaveManifest(m)
 	}
+	for i, spec := range m.VLLM {
+		if strings.EqualFold(spec.Repo, model) || strings.EqualFold(spec.Repo, repoPart) {
+			m.VLLM = append(m.VLLM[:i], m.VLLM[i+1:]...)
+			return t.SaveManifest(m)
+		}
+	}
 
 	suggestions := nearestMatches(m, model)
 	if len(suggestions) == 0 {
@@ -274,6 +308,7 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 	m := &Manifest{Version: manifest.SchemaVersion}
 	seenOllama := make(map[string]bool)
 	seenGGUF := make(map[string]bool)
+	seenVLLM := make(map[string]bool)
 	for _, im := range inv {
 		switch im.Backend {
 		case inventory.BackendOllama:
@@ -290,6 +325,13 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 			}
 			seenGGUF[key] = true
 			m.GGUF = append(m.GGUF, manifest.GGUFModelSpec{Repo: im.Repo, Quant: im.Quant})
+		case inventory.BackendVLLM:
+			key := strings.ToLower(im.Repo)
+			if seenVLLM[key] {
+				continue
+			}
+			seenVLLM[key] = true
+			m.VLLM = append(m.VLLM, manifest.VLLMModelSpec{Repo: im.Repo})
 		}
 	}
 	if err := t.SaveManifest(m); err != nil {
@@ -395,6 +437,10 @@ func findInstalled(inv []InstalledModel, model string, backend Backend) (Install
 				continue
 			}
 			candidates = append(candidates, im)
+		case inventory.BackendVLLM:
+			if strings.EqualFold(im.Repo, repo) || strings.EqualFold(im.Repo, model) {
+				candidates = append(candidates, im)
+			}
 		}
 	}
 
