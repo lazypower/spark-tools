@@ -559,6 +559,33 @@ NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
    `pkg/hfetch/auth` stays a canonical pkg leaf (sentinels; downstream import it directly);
    the tool facades (pkg/{hfetch,llmrun,llmserve,llmtidy}) stay as facades.
 
+### Strategic direction (reframes item 4 — decided 2026-06-28)
+
+The intended next product direction is to give **llm-serve an ENGINE DIMENSION**: add
+llama.cpp as a SECOND engine alongside vLLM, reusing llm-serve's existing container
+bring-up + HTTP prober + lifecycle + emit (llama-server exposes /health + /v1, so the
+prober just works). Eventually llm-run is a candidate for deprecation (too narrow +
+too host-coupled today) or reduction to sugar over the shared substrate.
+
+Consequences for the remaining tier above:
+- This MOOTS the host `process.Runner` / `engine.Launch` seam for the likely path —
+  llm-serve already drives containers, so there is no host long-lived-process model to
+  build. Do NOT build that seam speculatively (it was the "rabbit hole").
+- `servehost` (pkg/llmserve/runtime + lifecycle) becomes the engine-AGNOSTIC shared
+  substrate and is the worthwhile next extraction. `servespec`/`serveinstance`/`eviction`
+  are already engine-agnostic.
+- The real next work is a SPIKE, not more extraction: introduce an `Engine` interface
+  where vLLM is currently hardcoded — `internal/servecontract` (the Resolve(req,facts)
+  -> {Key,Flags,Warnings} shape is already engine-neutral; internals are vLLM) and
+  `internal/serveprofiles` (the vLLM arch registry + quant-flag table). vLLM = first
+  impl; llama.cpp = second impl (its own -ngl/--ctx-size/--chat-template vocab + compat
+  rules + contract key Engine="llamacpp/..."). Image ref comes from magus containers
+  (github.com/lazypower/magus/containers — ROCm/Strix-Halo today; GB10 is CUDA/Blackwell
+  sm121, so a CUDA llama.cpp image is needed; magus stays the image-publishing home).
+- Spike scope: trace the vLLM-assumption points (contract + profiles internals, emit
+  image defaults, and whether `up`/`emit` PICK the engine or INFER it from the artifact)
+  to locate where the Engine seam slots in and how engine selection reaches it.
+
 Duplicate authorities still to COLLAPSE (behavior-sensitive — not yet done):
 - CLI `runPull` vs `pkg/hfetch.Client.Pull` (richer CLI behavior; blocked on a
   base-URL seam in `newAPIClient` — see seam audit). One pull authority wanted.
