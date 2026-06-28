@@ -553,6 +553,17 @@ behavior stays uncovered, and the future integration test that should cover it.
   result. Future: extract an injectable UI interface (`internal/picker`) so the
   command layer can drive a scripted fake, per this audit's suggested API.
 
+- **`cmd/llm-tidy` prune deletion + sync execute.** Why: the prune confirmation
+  uses `internal/ui.Confirm` (TTY), the actual delete goes through
+  `reconcile.Prune` against real files plus the live `llm-serve liveness`
+  shell-out, and `sync` execute pulls models over the network (Ollama/HF).
+  Covered hermetically: `runPrune` planning + dry-run + the interlock-INACTIVE
+  branch (seeded registry, llm-serve forced absent), `runSync` dry-run +
+  already-in-sync, `runStatus` text/JSON, and `init` end to end. Uncovered:
+  interactive confirm, real deletion, the interlock fail-closed/protected branch
+  on a live box, and network pulls. Future: a build-tagged integration test on a
+  box with Docker + llm-serve, and an injected `Confirm`/pull seam.
+
 ## Overall Test Readiness
 
 Ready to extract with low risk:
