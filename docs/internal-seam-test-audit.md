@@ -564,6 +564,22 @@ behavior stays uncovered, and the future integration test that should cover it.
   on a live box, and network pulls. Future: a build-tagged integration test on a
   box with Docker + llm-serve, and an injected `Confirm`/pull seam.
 
+- **`cmd/llm-serve` lifecycle + liveness over a live runtime.** Why: `up`,
+  `down`, `status [name]`, `recover`, `forget` drive `Orchestrator` against
+  Docker/Compose, and `liveness --check` / `--protected-artifacts` probe running
+  containers via `docker ps`/`inspect`. Covered hermetically: all flag/value
+  parsing (`parseCaps`, `parseMounts`, `parseTarget`, `imageRef`), `loadRepoTree`,
+  `dirs()` XDG precedence, the `liveness --check` input parser (`readLines`,
+  spaces preserved) + `printUnmanaged` + `sortedKeys`, `profiles`/`targets`
+  output, `printStatus`, `status` with an empty state dir, and the full `emit`
+  flow proving the launch spec goes to stdout while advisories go to stderr (the
+  pipeable-command contract). Uncovered: orchestrated bring-up/teardown, status
+  reconcile against a live container, and the liveness Docker probe (the fake-
+  runtime versions live in `pkg/llmserve/{lifecycle,liveness}`). Future: a build-
+  tagged Docker/Compose integration test on a box with the runtime present —
+  this is also where the cross-tool `llm-tidy ↔ llm-serve liveness --check`
+  byte-compat assertion must finally run end to end.
+
 ## Overall Test Readiness
 
 Ready to extract with low risk:
