@@ -9,14 +9,6 @@ import (
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
-// removeDir deletes a model directory, tolerating an already-absent path.
-func removeDir(dir string) error {
-	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
 // VLLMList walks the hfetch registry and returns one InstalledModel per
 // HF-format (safetensors) model — at MODEL-DIRECTORY granularity, unlike GGUF's
 // per-file rows. A model is vLLM-format when it has at least one complete
@@ -67,17 +59,33 @@ func VLLMList(r *registry.Registry) ([]InstalledModel, error) {
 	return out, nil
 }
 
-// VLLMDelete removes a vLLM model: its actual on-disk directory plus the registry
-// entry. It deletes the real Path (covering a custom --output location), then
-// clears the registry record (which also removes the default model dir if present).
+// VLLMDelete removes a vLLM model by deleting ONLY this model's tracked files
+// (by their LocalPath) — never RemoveAll-ing a directory, which would over-delete
+// when a dir is shared (two models pulled to one --output, or a mixed
+// gguf+safetensors repo). Any `.gguf` file is left intact so a mixed repo's GGUF
+// model survives. An exclusively-empty model dir is then best-effort removed.
 func VLLMDelete(r *registry.Registry, m InstalledModel) error {
-	if m.Path != "" {
-		if err := removeDir(m.Path); err != nil {
-			return err
+	if err := r.Load(); err != nil {
+		return err
+	}
+	lm := r.Get(m.Repo)
+	if lm == nil {
+		return nil // already gone
+	}
+	var names []string
+	for _, f := range lm.Files {
+		if !strings.HasSuffix(f.Filename, ".gguf") {
+			names = append(names, f.Filename)
 		}
 	}
-	if err := r.Remove(m.Repo); err != nil {
+	if len(names) == 0 {
+		return nil
+	}
+	if err := r.Remove(m.Repo, names...); err != nil {
 		return err
+	}
+	if m.Path != "" {
+		_ = os.Remove(m.Path) // rmdir only if now-empty (exclusive); errors harmlessly if shared
 	}
 	return r.Save()
 }

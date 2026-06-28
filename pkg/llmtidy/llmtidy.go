@@ -308,6 +308,7 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 	m := &Manifest{Version: manifest.SchemaVersion}
 	seenOllama := make(map[string]bool)
 	seenGGUF := make(map[string]bool)
+	seenVLLM := make(map[string]bool)
 	for _, im := range inv {
 		switch im.Backend {
 		case inventory.BackendOllama:
@@ -324,6 +325,13 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 			}
 			seenGGUF[key] = true
 			m.GGUF = append(m.GGUF, manifest.GGUFModelSpec{Repo: im.Repo, Quant: im.Quant})
+		case inventory.BackendVLLM:
+			key := strings.ToLower(im.Repo)
+			if seenVLLM[key] {
+				continue
+			}
+			seenVLLM[key] = true
+			m.VLLM = append(m.VLLM, manifest.VLLMModelSpec{Repo: im.Repo})
 		}
 	}
 	if err := t.SaveManifest(m); err != nil {
@@ -429,6 +437,10 @@ func findInstalled(inv []InstalledModel, model string, backend Backend) (Install
 				continue
 			}
 			candidates = append(candidates, im)
+		case inventory.BackendVLLM:
+			if strings.EqualFold(im.Repo, repo) || strings.EqualFold(im.Repo, model) {
+				candidates = append(candidates, im)
+			}
 		}
 	}
 

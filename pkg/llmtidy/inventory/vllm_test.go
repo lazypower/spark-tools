@@ -77,6 +77,87 @@ func TestVLLMList_ExcludesGGUF_AndGGUFExcludesVLLM(t *testing.T) {
 	}
 }
 
+func TestVLLMDelete_PreservesGGUFInMixedRepo(t *testing.T) {
+	// codex P1: a repo with BOTH .gguf and .safetensors in one dir — pruning the
+	// vLLM row must remove only the safetensors (+ HF sidecars), NEVER the .gguf.
+	reg := registry.New(t.TempDir())
+	if err := reg.Load(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	mk := func(name string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		reg.AddFile("org/Mixed", registry.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
+		return p
+	}
+	safet := mk("model.safetensors")
+	cfg := mk("config.json")
+	ggufPath := mk("mixed.Q4_K_M.gguf")
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	vllm, _ := VLLMList(reg)
+	if len(vllm) != 1 {
+		t.Fatalf("expected one vLLM row, got %d", len(vllm))
+	}
+	if err := VLLMDelete(reg, vllm[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(ggufPath); err != nil {
+		t.Error("the .gguf file MUST survive a vLLM delete of a mixed repo")
+	}
+	for _, p := range []string{safet, cfg} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("safetensors/sidecar %q should be gone", p)
+		}
+	}
+	// The registry entry remains (it still has the .gguf).
+	if lm := reg.Get("org/Mixed"); lm == nil {
+		t.Error("the registry entry must remain for the surviving .gguf")
+	}
+}
+
+func TestVLLMDelete_DoesNotTouchAnotherModelInSharedDir(t *testing.T) {
+	// codex P1: two models pulled to the SAME dir — deleting one must not remove
+	// the other's files (no RemoveAll of the shared dir).
+	reg := registry.New(t.TempDir())
+	if err := reg.Load(); err != nil {
+		t.Fatal(err)
+	}
+	shared := t.TempDir()
+	mk := func(repo, name string) string {
+		p := filepath.Join(shared, name)
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		reg.AddFile(repo, registry.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
+		return p
+	}
+	mk("org/A", "a.safetensors")
+	bPath := mk("org/B", "b.safetensors")
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	vllm, _ := VLLMList(reg)
+	var a InstalledModel
+	for _, m := range vllm {
+		if m.Repo == "org/A" {
+			a = m
+		}
+	}
+	if err := VLLMDelete(reg, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(bPath); err != nil {
+		t.Error("model B's file MUST survive deleting model A from a shared dir")
+	}
+}
+
 func TestVLLMDelete_RemovesTheModelDir(t *testing.T) {
 	reg := registry.New(t.TempDir())
 	if err := reg.Load(); err != nil {
