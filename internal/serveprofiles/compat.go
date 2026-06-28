@@ -1,9 +1,9 @@
-package profiles
+package serveprofiles
 
 import (
 	"slices"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // CompatRequest is the slice of a serve request the compat rules examine: the

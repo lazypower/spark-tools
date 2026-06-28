@@ -452,6 +452,12 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync
   plan+apply; repointed inventory→internal/inventory, manifest→internal/tidymanifest,
   ollama→internal/ollama).
+- Serve-contract tier (pure): `serveprofiles` (← pkg/llmserve/profiles — the serving
+  architecture-profile registry, QuantFlags table, and negative-compat CompatRules;
+  package renamed profiles→serveprofiles to disambiguate from llm-run's profiles;
+  repointed onto internal/{serving,fingerprint}). Its dependents `contract`→`emit` are
+  the natural next picks (both pure; artifact/runtime/lifecycle/liveness stay deferred
+  — they pull in hfetch/api network + the Docker runtime).
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +

@@ -1,10 +1,10 @@
-package profiles
+package serveprofiles
 
 import (
 	"slices"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // seededProvenance records where the v1 claims came from. Per §8.0 every v1

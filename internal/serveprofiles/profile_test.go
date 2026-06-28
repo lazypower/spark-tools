@@ -1,10 +1,10 @@
-package profiles
+package serveprofiles
 
 import (
 	"slices"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 func TestQuantFlagsFor_KnownMethods(t *testing.T) {

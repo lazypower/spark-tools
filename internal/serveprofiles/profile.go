@@ -8,11 +8,11 @@
 // Following the §8.0 claims-vs-status split: claims are hand-seeded hypotheses
 // (this package), status is probe-generated (v2). v1 ships every claim stamped
 // `asserted` against the fingerprint it was authored on.
-package profiles
+package serveprofiles
 
 import (
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // ClaimStatus is the lifecycle of a capability claim (§8.0). Status is never
