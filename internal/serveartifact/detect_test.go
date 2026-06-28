@@ -1,11 +1,11 @@
-package artifact
+package serveartifact
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 func writeFile(t *testing.T, dir, name, content string) {

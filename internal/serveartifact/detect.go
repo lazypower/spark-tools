@@ -1,11 +1,11 @@
-// Package artifact reads the serving-relevant facts off a verified model
+// Package serveartifact reads the serving-relevant facts off a verified model
 // directory and is the boundary to hfetch's completeness gate. It is the read
 // side of design §5: model resolution goes THROUGH hfetch — verified,
 // immutable-revision artifacts only — and the artifact/load gate is delegated to
 // hfetch (pkg/hfetch/fileset), never reimplemented here (one authority). Verify
 // refuses to surface facts for an artifact that has not passed that gate, so
 // llm-serve can never emit a launch for an unverified model.
-package artifact
+package serveartifact
 
 import (
 	"encoding/json"
@@ -14,19 +14,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
-	"github.com/lazypower/spark-tools/pkg/hfetch/fileset"
-	"github.com/lazypower/spark-tools/pkg/hfetch/quant"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
+	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/fileset"
+	"github.com/lazypower/spark-tools/internal/modelmeta"
+	"github.com/lazypower/spark-tools/internal/serving"
 )
 
 // Verify runs hfetch's completeness gate against the artifact directory and, only
 // when it passes, detects and returns the serving facts. repoFiles is the repo's
-// file tree (the gate's authority, from api.ListFiles); dir is the local
+// file tree (the gate's authority, from hub.ListFiles); dir is the local
 // directory the model was pulled into. An incomplete artifact is rejected with
 // the named hard-fails — llm-serve does not emit a launch for a model hfetch
 // would not certify serve-ready.
-func Verify(repoFiles []api.ModelFile, dir string) (serving.ArtifactFacts, error) {
+func Verify(repoFiles []hub.ModelFile, dir string) (serving.ArtifactFacts, error) {
 	rep, err := fileset.Verify(repoFiles, dir)
 	if err != nil {
 		return serving.ArtifactFacts{}, fmt.Errorf("completeness gate could not run: %w", err)
@@ -144,7 +144,7 @@ func tokenizerClass(dir string) string {
 func detectQuant(dir string, configJSON []byte) serving.QuantMethod {
 	hfQuant, _ := os.ReadFile(filepath.Join(dir, "hf_quant_config.json"))
 	gptq, _ := os.ReadFile(filepath.Join(dir, "quantize_config.json"))
-	info := quant.Parse(configJSON, hfQuant, gptq)
+	info := modelmeta.ParseQuant(configJSON, hfQuant, gptq)
 	if info == nil {
 		return serving.QuantNone // no quant metadata at all — unquantized
 	}

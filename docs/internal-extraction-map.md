@@ -473,6 +473,12 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   resolver: local paths, aliases, hfetch registry refs, hf:// URIs, + the alias store
   CRUD; package renamed resolver→modelref; repointed registry→internal/modelstore
   (registry.→modelstore., 2 prose comments reverted) and gguf→internal/gguf).
+- serve artifact tier: `serveartifact` (← pkg/llmserve/artifact — the serving-fact
+  detector: arch/tokenizer/quant/vision/remote-code off a verified model dir, + the
+  Verify bridge to hfetch's completeness gate; package renamed artifact→serveartifact;
+  repointed ALL FOUR deps to internal — api→hub (api.→hub.), quant→modelmeta
+  (quant.Parse→modelmeta.ParseQuant, the wrapper's short name vs the authority's
+  ParseQuant), fileset→internal/fileset, serving→internal/serving).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync
@@ -527,11 +533,31 @@ NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
      tidymanifest); `serving` was extracted first to unblock it.
    - `inventory`/`reconcile` concretely depend on `*ollama.Client`; `ollama` (a clean
      already-injectable stdlib-only network leaf) was extracted first to unblock them.
-3. Network/host-bound (ISOLATE BEHIND INJECTABLE INTERFACES FIRST): `hub`
-   (hfetch/api), `download`, `ollama`, `openaiapi`, `llamacpp` (llmrun/engine),
-   `servehost` (llmserve/runtime+lifecycle; already has Runtime/Prober ifaces),
-   `eviction` (llmserve/liveness + llmtidy/interlock contract), `inference`
-   (cmd/llm-run orchestration).
+3. Network leaves (already injectable — DONE this lineage): `hub` (hfetch/api),
+   `download` (hfetch/download), `ollama` (llmtidy/ollama), `openaiapi` (llmrun/api).
+   Each already had a WithHTTPClient/WithBaseURL seam + httptest coverage, so the
+   "isolate behind an injectable interface FIRST" precondition was already met — they
+   extracted as clean leaves, NOT seam-building work. Also DONE as pure all-internal-dep
+   picks: `hubsource` (hfetch/source), `modelref` (llmrun/resolver), `serveartifact`
+   (llmserve/artifact).
+
+4. GENUINELY host-bound — the real remaining phase; needs injectable-seam DESIGN first
+   (a process.Runner / Docker-runtime / liveness-shellout abstraction), behavior-
+   sensitive, multiple valid seam shapes (a STOP-condition-class decision — surface it,
+   don't guess):
+   - `llamacpp` ← pkg/llmrun/engine: exec.LookPath/Command, long-lived child processes,
+     PID/log files, signals, HTTP readiness. Needs a process.Runner seam.
+   - `hardware` ← pkg/llmrun/hardware: shells nvidia-smi/sysctl/lscpu/vm_stat; ALSO
+     couples to engine.RunConfig — extract with/after engine.
+   - llm-run `profiles` ← pkg/llmrun/profiles: engine.RunConfig JSON store — defers with
+     engine.
+   - `servehost` ← pkg/llmserve/runtime + lifecycle: docker compose up/down, docker ps/
+     inspect (already has Runtime/Prober ifaces — closest to ready).
+   - `eviction` ← pkg/llmserve/liveness + pkg/llmtidy/interlock: the liveness Docker probe
+     + the `llm-serve liveness --check` shell-out contract (pkg/seam pins the wire format).
+   - `inference` ← cmd/llm-run orchestration: ties engine launch + readiness + TUI.
+   `pkg/hfetch/auth` stays a canonical pkg leaf (sentinels; downstream import it directly);
+   the tool facades (pkg/{hfetch,llmrun,llmserve,llmtidy}) stay as facades.
 
 Duplicate authorities still to COLLAPSE (behavior-sensitive — not yet done):
 - CLI `runPull` vs `pkg/hfetch.Client.Pull` (richer CLI behavior; blocked on a
