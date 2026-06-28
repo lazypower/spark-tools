@@ -454,3 +454,19 @@ Duplicate authorities still to COLLAPSE (behavior-sensitive — not yet done):
   base-URL seam in `newAPIClient` — see seam audit). One pull authority wanted.
 - CLI `runPrune` interlock vs `pkg/llmtidy.Tidy.Prune` (competing eviction
   path). One prune authority wanted.
+
+## Accepted boundary: alias-wrapper runtime type identity
+
+Compat wrappers re-export moved types via Go type ALIASES (`type X = internal.X`).
+This is the idiomatic, zero-cost compat mechanism and is REQUIRED for values to
+flow across the boundary unchanged. A consequence (raised by codex review of the
+modelstore iteration, classified document-boundary): runtime type IDENTITY now
+reports the internal/* authority — `%T`, `reflect.TypeOf().String()/PkgPath()` see
+`modelstore.Registry`, not `registry.Registry`.
+
+This is ACCEPTED, and verified inert: a repo-wide check found NO `%T` usage and NO
+`reflect` type-name/PkgPath inspection of any wrapped type; encoding/json keys off
+field tags (unchanged), not type names, so on-disk/wire formats are identical.
+Applies uniformly to every alias wrapper (quant, fileset, gguf, manifest,
+registry/modelstore, and future ones). Reversing it (defining types in pkg/* and
+having internal/* alias upward) would defeat the one-authority goal, so it stays.

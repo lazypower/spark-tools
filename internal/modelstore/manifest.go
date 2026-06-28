@@ -1,6 +1,7 @@
-// Package registry manages the local model registry, tracking
-// downloaded models in a JSON manifest.
-package registry
+// Package modelstore manages the local model registry, tracking downloaded
+// models in a JSON manifest. Extracted from pkg/hfetch/registry during the
+// /internal extraction; pkg/hfetch/registry remains as a compat wrapper.
+package modelstore
 
 import (
 	"encoding/json"
