@@ -76,6 +76,32 @@ Out-of-scope binaries also ran:
   passed.
 - `cmd/llm-chat`: 0.0% command coverage.
 
+## Coverage After Seam Tests
+
+Behavior-locking seam tests were added component by component (one commit each).
+The intended-import-surface facades and the shared/pure command logic now carry
+the extraction risk; the residual gaps are host/TTY/network-bound and deferred
+(documented under "Deferred Gaps").
+
+| Package | Before | After | Notes |
+| --- | ---: | ---: | --- |
+| `internal/progress` | 0.0% | 100.0% | pure formatters |
+| `internal/tui` | 3.3% | 38.5% | status renderers + chat slash commands (TUI loop deferred) |
+| `internal/ui` | 0.0% | 9.1% | empty-items guard (huh forms need a TTY) |
+| `cmd/llm-tidy` | 5.2% | 73.9% | flags, plan, render, JSON, init/status/sync/prune flows |
+| `cmd/llm-serve` | 0.0% | 61.6% | parse/emit/dir/liveness-input (Docker orchestration deferred) |
+| `pkg/hfetch` (facade) | 0.0% | 69.4% | Client.Pull end to end vs a mock Hub |
+| `cmd/hfetch` | 7.4% | 14.6% | config + pull helpers (network CLI flows deferred) |
+| `pkg/llmrun` (facade) | 0.0% | 78.4% | NewEngine/ResolveModel/BuildCommand surface |
+| `cmd/llm-run` | 0.0% | 6.4% | scan/defaults/flag-precedence (launch + TUI deferred) |
+| `pkg/seam` | (contracts) | +1 | cross-tool interlock wire protocol |
+
+The two facades that downstream tools import (`pkg/hfetch`, `pkg/llmrun`) moved
+from 0% to ~70–78%. The command binaries that stayed low (`cmd/hfetch`,
+`cmd/llm-run`) are thin shells whose remaining lines are interactive pickers,
+live process launch, and un-redirectable network clients — the exact code the
+`/internal/*` extraction will make injectable, after which it becomes testable.
+
 ## Commands With No Direct Seam Coverage
 
 - `cmd/llm-run`: no tests. Uncovered command seams include `chat`, `run`,
@@ -613,16 +639,64 @@ behavior stays uncovered, and the future integration test that should cover it.
 
 ## Overall Test Readiness
 
-Ready to extract with low risk:
+Ready to extract with low risk (was already covered):
 
 - Quant parsing, fileset completeness, registry storage, manifest validation,
   hfetch API tree/listing behavior, llmserve contract resolution, emit rendering,
   liveness core logic, and tidy reconcile planning.
 
-Needs tests before extraction:
+Now locked by the seam tests added in this pass:
 
-- Command orchestration for `llm-run` and `llm-serve`.
-- The hfetch CLI/library pull parity.
-- Real process boundary adapters with injected runners.
-- Cross-tool eviction contract between `llm-tidy` and `llm-serve`.
-- Output contracts for pipeable commands and JSON modes.
+- **Import-surface facades** — `pkg/hfetch.Client.Pull` (resolve-from-tree →
+  download → register) and `pkg/llmrun` (NewEngine/ResolveModel/BuildCommand)
+  are exercised end to end. Downstream tools (llm-bench, llm-run) can be moved
+  onto `/internal/*` packages behind these without silent behavior drift.
+- **Output contracts** — `llm-serve emit` stdout/stderr separation, `llm-tidy
+  status --json` shape, prune/status/backend rendering, and the chat status
+  renderers are golden-asserted.
+- **Config / dir / flag resolution** — hfetch prefs, llm-serve XDG dir
+  precedence, llm-tidy manifest precedence, and llm-run `applyDefaults` flag
+  precedence.
+- **Cross-tool eviction wire contract** — the `llm-tidy` shell-out ↔ `llm-serve
+  liveness --check` stdin/stdout protocol round-trips byte-for-byte (spaces
+  preserved) across a real subprocess (`pkg/seam`), and the interlock fails
+  CLOSED when llm-serve is configured-but-unresolvable.
+- **Command planning / value parsing** — prune/sync plan filters, emit
+  cap/mount/target/imageRef parsing, bandwidth/stream/token helpers, and
+  scanLocalModels registry-path mapping.
+
+Deferred to build-tagged integration tests (genuinely need a host dependency —
+see "Deferred Gaps" for the per-seam why/uncovered/future):
+
+- Docker/Compose orchestration: `llm-serve up/down/recover/forget`, live status
+  reconcile, the liveness Docker probe, and `llm-tidy` real deletion under a
+  live interlock.
+- Process/TTY boundaries: `llm-run` `engine.Launch` + chat bubbletea loop +
+  live SSE streaming; `internal/ui` huh forms; the hfetch quant picker.
+- Network/CLI flows: `hfetch runPull` (no base-URL seam on `newAPIClient` yet),
+  `ollama-import`, and `llm-tidy sync` execute.
+
+### Why the extraction is now sufficiently protected
+
+The risk in an `/internal/*` extraction is a *behavior* change slipping through
+a *mechanical* move. The seams that would actually carry behavior across the new
+package boundaries are now pinned:
+
+1. The two facades downstream code imports are tested end to end, so moving their
+   innards behind `/internal/*` is verifiable by a green facade test.
+2. Every cross-tool and cross-process contract that a move could desync — the
+   eviction wire protocol, the emit pipeable-output split, the shared hfetch
+   registry shape (`pkg/seam`), and the interlock fail-closed guarantee — has a
+   tripwire test.
+3. The pure, relocatable logic (planning, parsing, formatting, config/dir
+   resolution) is locked at the current call sites, so the same inputs must
+   produce the same outputs after relocation.
+
+What remains uncovered is exclusively code that *cannot* run without Docker,
+systemd, a TTY, a live model server, or network — and each such site is
+enumerated above with the integration test that should cover it once the
+matching injectable seam (`internal/process`, `internal/inference`, an
+`internal/servehost` runner, a base-URL/`Confirm`/pull injection) exists. That
+injectable seam IS the extraction; the deferrals are therefore work the refactor
+enables, not gaps that block it. Net: the move can proceed with regression risk
+confined to host-bound paths that have no current hermetic seam.
