@@ -1,104 +1,49 @@
-// Package manifest parses, validates, and persists the llm-tidy desired-state manifest.
+// Package manifest is a compatibility wrapper over internal/tidymanifest. The
+// llm-tidy desired-state manifest authority moved to internal/tidymanifest during
+// the /internal extraction; this thin alias keeps existing importers (pkg/llmtidy,
+// pkg/llmtidy/reconcile, cmd/llm-tidy) compiling unchanged until they migrate.
+//
+// Deprecated: import github.com/lazypower/spark-tools/internal/tidymanifest.
 package manifest
 
-import (
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+import "github.com/lazypower/spark-tools/internal/tidymanifest"
 
-	"gopkg.in/yaml.v3"
+// Schema / filename / env constants (re-exported).
+const (
+	SchemaVersion   = tidymanifest.SchemaVersion
+	DefaultFilename = tidymanifest.DefaultFilename
+	EnvManifest     = tidymanifest.EnvManifest
+	EnvConfigDir    = tidymanifest.EnvConfigDir
+	EnvXDGConfig    = tidymanifest.EnvXDGConfig
+	AppName         = tidymanifest.AppName
 )
 
-// SchemaVersion is the manifest schema version this package writes and accepts.
-const SchemaVersion = 1
+// ErrNotFound is the same sentinel as the authority, so errors.Is keeps working
+// across the wrapper boundary.
+var ErrNotFound = tidymanifest.ErrNotFound
 
-// Manifest is the desired model state for a machine.
-type Manifest struct {
-	Version int               `yaml:"version"`
-	Ollama  []OllamaModelSpec `yaml:"ollama,omitempty"`
-	GGUF    []GGUFModelSpec   `yaml:"gguf,omitempty"`
-	VLLM    []VLLMModelSpec   `yaml:"vllm,omitempty"`
-}
+// Manifest types (aliases — methods like OllamaModelSpec.NormalizedName carry over).
+type (
+	Manifest        = tidymanifest.Manifest
+	OllamaModelSpec = tidymanifest.OllamaModelSpec
+	GGUFModelSpec   = tidymanifest.GGUFModelSpec
+	VLLMModelSpec   = tidymanifest.VLLMModelSpec
+)
 
-// OllamaModelSpec declares a model that should exist in Ollama.
-type OllamaModelSpec struct {
-	Name string `yaml:"name"`
-}
+// Resolve picks the manifest path. Delegates to the tidymanifest authority.
+func Resolve(flagPath string) (string, error) { return tidymanifest.Resolve(flagPath) }
 
-// GGUFModelSpec declares a model that should exist in the hfetch registry.
-type GGUFModelSpec struct {
-	Repo  string `yaml:"repo"`
-	Quant string `yaml:"quant,omitempty"`
-}
-
-// VLLMModelSpec declares an HF-format (safetensors) model that should exist in
-// the hfetch registry — matched by repo id.
-type VLLMModelSpec struct {
-	Repo string `yaml:"repo"`
-}
-
-// NormalizedName returns the Ollama spec name with ":latest" appended when no
-// tag is present, matching Ollama's own default-tag convention.
-func (s OllamaModelSpec) NormalizedName() string {
-	return NormalizeOllamaName(s.Name)
-}
+// ConfigDir returns the resolved config directory.
+func ConfigDir() (string, error) { return tidymanifest.ConfigDir() }
 
 // NormalizeOllamaName appends ":latest" when no tag is present.
-func NormalizeOllamaName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	if strings.Contains(name, ":") {
-		return name
-	}
-	return name + ":latest"
-}
+func NormalizeOllamaName(name string) string { return tidymanifest.NormalizeOllamaName(name) }
 
-// ErrNotFound is returned by Load when the manifest file does not exist.
-var ErrNotFound = errors.New("no manifest found")
+// Load reads and parses a manifest, returning ErrNotFound when absent.
+func Load(path string) (*Manifest, error) { return tidymanifest.Load(path) }
 
-// Load reads and parses a manifest from the given path. Returns ErrNotFound
-// if the file does not exist so callers can offer the "run llm-tidy init"
-// remediation from spec §9.
-func Load(path string) (*Manifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
+// Save writes the manifest as YAML to the given path.
+func Save(m *Manifest, path string) error { return tidymanifest.Save(m, path) }
 
-	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("manifest parse error: %w", err)
-	}
-	return &m, nil
-}
-
-// Save writes the manifest as YAML to the given path, creating parent
-// directories as needed.
-func Save(m *Manifest, path string) error {
-	if m == nil {
-		return errors.New("manifest is nil")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("cannot create manifest directory: %w", err)
-	}
-
-	out := *m
-	if out.Version == 0 {
-		out.Version = SchemaVersion
-	}
-	data, err := yaml.Marshal(&out)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("cannot write manifest: %w", err)
-	}
-	return nil
-}
+// Validate checks the manifest for structural errors.
+func Validate(m *Manifest) error { return tidymanifest.Validate(m) }
