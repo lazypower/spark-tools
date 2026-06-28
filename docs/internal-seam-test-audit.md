@@ -580,6 +580,23 @@ behavior stays uncovered, and the future integration test that should cover it.
   this is also where the cross-tool `llm-tidy ↔ llm-serve liveness --check`
   byte-compat assertion must finally run end to end.
 
+- **`cmd/hfetch` network command flows (`runPull`, `ollama-import`, auth,
+  search, files, list, path, rm, gc).** Why: these construct an `api.Client` via
+  `newAPIClient`, which hardcodes the HuggingFace endpoint with NO base-URL
+  override (unlike the library `hfetch.NewClient`, which has `WithBaseURL`), so
+  the CLI flows cannot be redirected at a mock server at the current seam; the
+  interactive quant picker also needs a TTY, and `ollama-import` shells out to
+  `ollama`. Covered hermetically: the facade `hfetch.Client.Pull` end to end
+  against a mock Hub (resolves size/hash from the tree listing, downloads,
+  registers — the downstream import surface, 0% → 69.4%), `fileMeta`,
+  config prefs round-trip + set/get, and all pull helpers (resolveDest,
+  validate/collision, completeness, resolveStreams, parseBandwidth, redactToken,
+  tokenSourceLabel). Uncovered: CLI `runPull` parity with the facade.
+  **Recommended extraction:** have `runPull` delegate to `hfetch.Client.Pull`
+  (collapsing the duplicated client/registry/download logic onto the one tested
+  authority) — at which point the parity gap closes by construction. Future: a
+  CLI integration test once `newAPIClient` accepts a base-URL seam or delegates.
+
 ## Overall Test Readiness
 
 Ready to extract with low risk:
