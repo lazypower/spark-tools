@@ -467,10 +467,17 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   contract→internal/servecontract). The pure serve-contract/spec tier is now fully
   internal. Still deferred (host-bound / network): `artifact` (hfetch/api), `runtime`
   (Docker/Compose shell-out), `lifecycle` + `liveness` (Orchestrator over runtime).
+- llm-run config tier: `runconfig` (← pkg/llmrun/config — llm-run XDG dirs +
+  GlobalConfig load/save; package renamed config→runconfig to disambiguate from
+  hfetch's config; only dep is internal/paths). NOTE the map's "runconfig" target also
+  named llm-run profiles, but `pkg/llmrun/profiles` imports `pkg/llmrun/engine`
+  (host-bound llama.cpp) for engine.RunConfig, so it defers WITH engine — same coupling
+  as `hardware`. config does not import profiles, so it extracted cleanly on its own.
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
-1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
-   profiles), `servecontract`, `servespec`.
+1. Config/pure tier: `servecontract`, `servespec`, `serveprofiles`, runconfig
+   (llm-run config) — ALL DONE (see Extracted list above). STILL pending: `hftoken`,
+   `hardware`, llm-run `profiles`.
    - `hftoken` BLOCKED: token.go reads config.Dirs() for the token path (honoring
      HFETCH_HOME/HFETCH_CONFIG_DIR), so internal/hftoken would form a
      config<->hftoken import cycle. Needs a small enabling refactor first: inject
@@ -478,6 +485,8 @@ NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
      have it pass Dirs().Config down). Behavior-sensitive — do under codex.
    - `hardware` couples to pkg/llmrun/engine (RunConfig); extract after/with engine
      to avoid a temporary cross-layer import.
+   - llm-run `profiles` (RunConfig JSON profile store) ALSO imports pkg/llmrun/engine
+     for engine.RunConfig — same engine coupling as `hardware`; defers WITH engine.
 2. State: `serveinstance`, `inventory`, `reconcile` — ALL DONE. Notes on the actual
    graph (the original "depend only on modelstore/tidymanifest" note was imprecise):
    - `serveinstance` depended on the serving vocab + fingerprint (not modelstore/
