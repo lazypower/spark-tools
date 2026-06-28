@@ -6,87 +6,28 @@ import (
 	"testing"
 )
 
-func TestResolveToken_FlagOverride(t *testing.T) {
-	t.Setenv("HFETCH_TOKEN", "env_token")
-	result := ResolveToken("flag_token")
-	if result.Token != "flag_token" || result.Source != "flag" {
-		t.Errorf("expected flag override, got %+v", result)
-	}
-}
+// The token-resolution behavior suite lives in internal/hftoken. These tests are
+// the wiring smoke tests: they prove the public ResolveToken/StoreToken/ClearToken
+// thread Dirs().Config (honoring HFETCH_CONFIG_DIR/HFETCH_HOME) into the hftoken
+// authority — the integration the config layer owns.
 
-func TestResolveToken_EnvVar(t *testing.T) {
-	t.Setenv("HFETCH_TOKEN", "env_token")
-	result := ResolveToken("")
-	if result.Token != "env_token" || result.Source != "env" {
-		t.Errorf("expected env token, got %+v", result)
-	}
-}
-
-func TestResolveToken_ConfigFile(t *testing.T) {
+func TestResolveToken_ConfigFileWiring(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HFETCH_TOKEN", "")
 	t.Setenv("HFETCH_CONFIG_DIR", tmp)
 	t.Setenv("HFETCH_HOME", "")
 
-	// Write a token file.
 	if err := os.WriteFile(filepath.Join(tmp, "token.json"), []byte(`{"default":"file_token"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	result := ResolveToken("")
 	if result.Token != "file_token" || result.Source != "config" {
-		t.Errorf("expected config token, got %+v", result)
+		t.Errorf("ResolveToken must read Dirs().Config/token.json, got %+v", result)
 	}
 }
 
-func TestResolveToken_TrimsWhitespace(t *testing.T) {
-	// A pasted token often carries a trailing newline; it must be trimmed
-	// so the Authorization header stays valid.
-	t.Run("env", func(t *testing.T) {
-		t.Setenv("HFETCH_TOKEN", "  hf_envtoken\n")
-		result := ResolveToken("")
-		if result.Token != "hf_envtoken" || result.Source != "env" {
-			t.Errorf("expected trimmed env token, got %+v", result)
-		}
-	})
-
-	t.Run("flag", func(t *testing.T) {
-		result := ResolveToken("hf_flagtoken\n")
-		if result.Token != "hf_flagtoken" || result.Source != "flag" {
-			t.Errorf("expected trimmed flag token, got %+v", result)
-		}
-	})
-
-	t.Run("config", func(t *testing.T) {
-		tmp := t.TempDir()
-		t.Setenv("HFETCH_TOKEN", "")
-		t.Setenv("HFETCH_CONFIG_DIR", tmp)
-		t.Setenv("HFETCH_HOME", "")
-		if err := os.WriteFile(filepath.Join(tmp, "token.json"), []byte(`{"default":"hf_filetoken\n"}`), 0600); err != nil {
-			t.Fatal(err)
-		}
-		result := ResolveToken("")
-		if result.Token != "hf_filetoken" || result.Source != "config" {
-			t.Errorf("expected trimmed config token, got %+v", result)
-		}
-	})
-}
-
-func TestResolveToken_None(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HFETCH_TOKEN", "")
-	t.Setenv("HFETCH_CONFIG_DIR", tmp)
-	t.Setenv("HFETCH_HOME", "")
-	// Override HOME to avoid reading any real HF compat token.
-	t.Setenv("HOME", tmp)
-
-	result := ResolveToken("")
-	if result.Token != "" || result.Source != "none" {
-		t.Errorf("expected no token, got %+v", result)
-	}
-}
-
-func TestStoreAndClearToken(t *testing.T) {
+func TestStoreAndClearToken_Wiring(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HFETCH_CONFIG_DIR", tmp)
 	t.Setenv("HFETCH_HOME", "")
@@ -94,40 +35,19 @@ func TestStoreAndClearToken(t *testing.T) {
 	if err := StoreToken("hf_test123"); err != nil {
 		t.Fatalf("StoreToken: %v", err)
 	}
-
-	// Verify the file was created with correct permissions.
-	info, err := os.Stat(filepath.Join(tmp, "token.json"))
-	if err != nil {
-		t.Fatalf("token.json not found: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("expected 0600 permissions, got %o", perm)
+	if _, err := os.Stat(filepath.Join(tmp, "token.json")); err != nil {
+		t.Fatalf("StoreToken must write under Dirs().Config: %v", err)
 	}
 
-	// Resolve should find it.
 	t.Setenv("HFETCH_TOKEN", "")
-	result := ResolveToken("")
-	if result.Token != "hf_test123" {
+	if result := ResolveToken(""); result.Token != "hf_test123" {
 		t.Errorf("expected stored token, got %+v", result)
 	}
 
-	// Clear it.
 	if err := ClearToken(); err != nil {
 		t.Fatalf("ClearToken: %v", err)
 	}
-	result = ResolveToken("")
-	if result.Token != "" {
+	if result := ResolveToken(""); result.Token != "" {
 		t.Errorf("expected no token after clear, got %+v", result)
-	}
-}
-
-func TestClearToken_NoFile(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HFETCH_CONFIG_DIR", tmp)
-	t.Setenv("HFETCH_HOME", "")
-
-	// Should not error when no token file exists.
-	if err := ClearToken(); err != nil {
-		t.Fatalf("ClearToken on missing file: %v", err)
 	}
 }

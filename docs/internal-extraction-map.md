@@ -473,16 +473,24 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   named llm-run profiles, but `pkg/llmrun/profiles` imports `pkg/llmrun/engine`
   (host-bound llama.cpp) for engine.RunConfig, so it defers WITH engine — same coupling
   as `hardware`. config does not import profiles, so it extracted cleanly on its own.
+- hfetch token tier: `hftoken` (← pkg/hfetch/config token.go — HF token resolve/store/
+  clear). UNBLOCKED via the prescribed config-dir INJECTION refactor: hftoken.Resolve/
+  Store/Clear take a configDir param and import ONLY pkg/hfetch/auth (the canonical
+  TokenResult vocabulary), so no config<->hftoken cycle. pkg/hfetch/config keeps the
+  public ResolveToken/StoreToken/ClearToken signatures as thin delegators passing
+  Dirs().Config down. Resolution order/labels, whitespace trimming, file perms (0700/
+  0600), JSON shape, Clear idempotence, and the os.UserHomeDir() HF-compat path are all
+  unchanged. (auth itself stays a canonical pkg leaf — hftoken→auth is the accepted
+  temporary cross-layer import, same as fileset→api.)
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `servecontract`, `servespec`, `serveprofiles`, runconfig
-   (llm-run config) — ALL DONE (see Extracted list above). STILL pending: `hftoken`,
+   (llm-run config), `hftoken` — ALL DONE (see Extracted list above). STILL pending:
    `hardware`, llm-run `profiles`.
-   - `hftoken` BLOCKED: token.go reads config.Dirs() for the token path (honoring
-     HFETCH_HOME/HFETCH_CONFIG_DIR), so internal/hftoken would form a
-     config<->hftoken import cycle. Needs a small enabling refactor first: inject
-     the config dir into the resolver (keep config.ResolveToken's public signature;
-     have it pass Dirs().Config down). Behavior-sensitive — do under codex.
+   - `hftoken` DONE (was the documented blocker): resolved via the config-dir injection
+     enabling-refactor — internal/hftoken.Resolve/Store/Clear take configDir; config's
+     public delegators pass Dirs().Config down. No cycle. Codex-clean (behavior-sensitive
+     pass).
    - `hardware` couples to pkg/llmrun/engine (RunConfig); extract after/with engine
      to avoid a temporary cross-layer import.
    - llm-run `profiles` (RunConfig JSON profile store) ALSO imports pkg/llmrun/engine
