@@ -56,8 +56,17 @@ func Apply(ctx context.Context, plan []InstalledModel, check Checker) Result {
 	var pathBased []InstalledModel
 	var paths []string
 	for _, m := range plan {
+		// ONLY Ollama is exempt (deleted via its own API, governed by Ollama's
+		// runtime). Everything else is path-gated by default — so a NEW backend, or
+		// a path-based model with a MISSING path, fails CLOSED rather than slipping
+		// through unchecked.
+		if m.Backend == inventory.BackendOllama {
+			res.Keep = append(res.Keep, m)
+			continue
+		}
 		if m.Path == "" {
-			res.Keep = append(res.Keep, m) // not path-based (Ollama) — never gated here
+			res.Blocked = append(res.Blocked, Blocked{Model: m,
+				Reason: "path-based model has no on-disk path; cannot verify liveness (fail-closed)"})
 			continue
 		}
 		pathBased = append(pathBased, m)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -93,13 +92,16 @@ func livenessCmd() *cobra.Command {
 	return cmd
 }
 
-// readLines reads non-empty trimmed lines from r.
+// readLines reads candidate paths from r, one per line. It does NOT trim the line
+// content — a path may legitimately have leading/trailing spaces — it only skips
+// empty lines (Scanner already strips the \n/\r delimiter; a filename cannot
+// contain a newline, so line-delimiting is safe).
 func readLines(r io.Reader) ([]string, error) {
 	var out []string
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
+		if line := sc.Text(); line != "" {
 			out = append(out, line)
 		}
 	}

@@ -88,6 +88,17 @@ func TestApply_SurfacesWarnings(t *testing.T) {
 	}
 }
 
+func TestApply_GGUFEmptyPath_FailsClosed(t *testing.T) {
+	// codex P1: a path-based (GGUF) model with no on-disk path must NOT slip
+	// through as Ollama-like — it fails closed (blocked), never pruned unchecked.
+	plan := []InstalledModel{{Name: "broken", Backend: inventory.BackendGGUF, Path: ""}}
+	res := Apply(context.Background(), plan, checker(nil, nil, errors.New("should not be called")))
+	if len(res.Blocked) != 1 || len(res.Keep) != 0 {
+		t.Errorf("a GGUF model with no path must be blocked (fail-closed), got keep=%v blocked=%v",
+			names(res.Keep), res.Blocked)
+	}
+}
+
 func TestApply_NoPathBased_NoCheck(t *testing.T) {
 	res := Apply(context.Background(), []InstalledModel{ollama("x")}, checker(nil, nil, errors.New("should not be called")))
 	if len(res.Keep) != 1 || len(res.Blocked) != 0 {

@@ -13,6 +13,7 @@ import (
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
@@ -46,6 +47,7 @@ type config struct {
 	manifestPath string
 	ollamaHost   string
 	hfetchClient *hfetch.Client
+	checker      interlock.Checker
 }
 
 // WithManifestPath sets an explicit manifest path, overriding env/XDG.
@@ -59,6 +61,13 @@ func WithOllamaHost(host string) Option {
 }
 
 // WithHfetchClient injects an hfetch client; used in tests to avoid network.
+// WithChecker overrides the eviction-interlock liveness checker (default: shell
+// out to `llm-serve liveness`). Tests inject a fake; a consumer that runs no
+// llm-serve can disable it with a checker returning interlock.ErrLLMServeAbsent.
+func WithChecker(c interlock.Checker) Option {
+	return func(cfg *config) { cfg.checker = c }
+}
+
 func WithHfetchClient(client *hfetch.Client) Option {
 	return func(c *config) { c.hfetchClient = client }
 }
@@ -68,6 +77,7 @@ type Tidy struct {
 	manifestPath string
 	provider     *inventory.Provider
 	hfetch       *hfetch.Client
+	checker      interlock.Checker
 }
 
 // New builds a Tidy configured per the options.
@@ -92,10 +102,16 @@ func New(opts ...Option) (*Tidy, error) {
 	dirs := hfconfig.Dirs()
 	reg := registry.New(dirs.Data)
 
+	checker := cfg.checker
+	if checker == nil {
+		checker = interlock.LLMServeChecker("") // default: shell out to llm-serve
+	}
+
 	return &Tidy{
 		manifestPath: path,
 		provider:     &inventory.Provider{Ollama: oc, GGUF: reg},
 		hfetch:       cfg.hfetchClient,
+		checker:      checker,
 	}, nil
 }
 
@@ -166,6 +182,10 @@ func (t *Tidy) Prune(
 		}
 		plan = filtered
 	}
+	// Eviction interlock (B3): the gate lives HERE, at the deletion authority, so
+	// EVERY library prune is protected — not just the CLI. Protected (in-use)
+	// models are dropped from the plan; fail-closed if liveness can't be reached.
+	plan = interlock.Apply(ctx, plan, t.checker).Keep
 	return reconcile.Prune(ctx, t.provider, plan, nil)
 }
 

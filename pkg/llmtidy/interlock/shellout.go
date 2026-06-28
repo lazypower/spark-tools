@@ -32,11 +32,16 @@ func LLMServeChecker(bin string) Checker {
 	}
 }
 
+// splitNonEmpty splits on newlines and keeps non-empty lines WITHOUT trimming
+// their content — a path may legitimately have leading/trailing spaces, and
+// trimming would desync the echo-match against the candidate's Path. A trailing
+// \r (if any) is stripped, but spaces are preserved.
 func splitNonEmpty(s string) []string {
 	var out []string
 	for line := range strings.SplitSeq(s, "\n") {
-		if l := strings.TrimSpace(line); l != "" {
-			out = append(out, l)
+		line = strings.TrimSuffix(line, "\r")
+		if line != "" {
+			out = append(out, line)
 		}
 	}
 	return out
