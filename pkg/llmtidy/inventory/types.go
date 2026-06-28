@@ -68,4 +68,9 @@ type InstalledModel struct {
 	// Filename is the on-disk filename within the hfetch registry. Empty
 	// for Ollama.
 	Filename string
+
+	// Path is the on-disk host path of the model file/dir. Set for path-based
+	// backends (GGUF); EMPTY for Ollama, which is deleted via its own API by name
+	// and is governed by Ollama's runtime, not the llm-serve eviction interlock.
+	Path string
 }

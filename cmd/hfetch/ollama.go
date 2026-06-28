@@ -539,7 +539,7 @@ var knownTemplateFamilies = []templateFamily{
 	},
 	{
 		// Command R / Cohere
-		markers: []string{"<|START_OF_TURN_TOKEN|>", "<|END_OF_TURN_TOKEN|>"},
+		markers:    []string{"<|START_OF_TURN_TOKEN|>", "<|END_OF_TURN_TOKEN|>"},
 		goTemplate: `{{ if .System }}<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ .System }}<|END_OF_TURN_TOKEN|>{{ end }}<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ .Prompt }}<|END_OF_TURN_TOKEN|><|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{{ .Response }}<|END_OF_TURN_TOKEN|>`,
 		extraStops: []string{"<|END_OF_TURN_TOKEN|>"},
 	},

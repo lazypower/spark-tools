@@ -180,18 +180,35 @@ func (l *Liveness) addRoot(r *Report, path string) bool {
 // same way as the protected set, and fails closed (an empty/unevaluable path, or
 // an AllProtected report, returns true).
 func (l *Liveness) IsProtected(ctx context.Context, artifactPath string) bool {
-	r := l.Protected(ctx)
+	return l.Protected(ctx).Protects(artifactPath)
+}
+
+// FilterProtected returns the subset of candidate paths that are protected,
+// computing the live report ONCE (a single runtime query for the whole batch),
+// and returns the report too (for its Unmanaged complaints / AllProtected).
+func (l *Liveness) FilterProtected(ctx context.Context, candidates []string) (protected []string, report Report) {
+	report = l.Protected(ctx)
+	for _, c := range candidates {
+		if report.Protects(c) {
+			protected = append(protected, c)
+		}
+	}
+	return protected, report
+}
+
+// Protects reports whether a candidate host path is protected by this report. A
+// candidate is protected when the report is fail-closed, when the path can't be
+// evaluated, or when it OVERLAPS any protected root (equal, candidate-under-root
+// — an artifact inside a foreign mount — or root-under-candidate — evicting a
+// parent of a served artifact).
+func (r Report) Protects(candidate string) bool {
 	if r.AllProtected {
 		return true
 	}
-	key, ok := canonicalize(artifactPath)
-	if artifactPath == "" || !ok {
+	key, ok := canonicalize(candidate)
+	if candidate == "" || !ok {
 		return true // can't evaluate the candidate → protect (fail closed)
 	}
-	// Protected if the candidate OVERLAPS any protected root: deleting it would
-	// affect a protected path, or a protected path lives under it. Exact match,
-	// candidate-under-root (artifact inside a foreign mount), and root-under-
-	// candidate (evicting a parent of a served artifact) all count.
 	for root := range r.Protected {
 		if pathsOverlap(key, root) {
 			return true

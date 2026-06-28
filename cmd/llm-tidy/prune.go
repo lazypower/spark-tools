@@ -11,16 +11,18 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/ui"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
+	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/reconcile"
 )
 
 func pruneCmd() *cobra.Command {
 	var (
-		backend   string
-		dryRun    bool
-		yes       bool
-		olderThan string
+		backend     string
+		dryRun      bool
+		yes         bool
+		olderThan   string
+		noInterlock bool
 	)
 	cmd := &cobra.Command{
 		Use:   "prune",
@@ -39,10 +41,11 @@ func pruneCmd() *cobra.Command {
 				return err
 			}
 			return runPrune(cmd.Context(), cmd.OutOrStdout(), tidy, pruneOpts{
-				backend:   b,
-				dryRun:    dryRun,
-				skipPrompt: yes,
-				olderThan: d,
+				backend:     b,
+				dryRun:      dryRun,
+				skipPrompt:  yes,
+				olderThan:   d,
+				noInterlock: noInterlock,
 			})
 		},
 	}
@@ -50,14 +53,16 @@ func pruneCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the plan without executing")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
 	cmd.Flags().StringVar(&olderThan, "older-than", "", "only prune untracked models older than this (e.g. 7d, 30d, 2h)")
+	cmd.Flags().BoolVar(&noInterlock, "no-interlock", false, "skip the llm-serve eviction safety check (you own the risk)")
 	return cmd
 }
 
 type pruneOpts struct {
-	backend    inventory.ModelBackend
-	dryRun     bool
-	skipPrompt bool
-	olderThan  time.Duration
+	backend     inventory.ModelBackend
+	dryRun      bool
+	skipPrompt  bool
+	olderThan   time.Duration
+	noInterlock bool
 }
 
 func runPrune(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, opts pruneOpts) error {
@@ -72,6 +77,27 @@ func runPrune(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, opts pruneOp
 	if len(plan) == 0 {
 		fmt.Fprintln(w, "Nothing to prune.")
 		return nil
+	}
+
+	// Eviction interlock: never prune a model llm-serve reports in use (B3). The
+	// check shells out to `llm-serve liveness`; fail-closed if it's present but
+	// undeterminable, inactive if llm-serve isn't deployed here.
+	if !opts.noInterlock {
+		ilk := interlock.Apply(ctx, plan, interlock.LLMServeChecker(""))
+		for _, warn := range ilk.Warnings {
+			fmt.Fprintf(w, "%s %s\n", styleHint.Render("⚠"), warn)
+		}
+		for _, b := range ilk.Blocked {
+			fmt.Fprintf(w, "  %s %s — %s\n", styleHint.Render("⛔ kept:"), b.Model.Name, b.Reason)
+		}
+		if ilk.Inactive {
+			fmt.Fprintln(w, styleHint.Render("(llm-serve not found; eviction interlock inactive)"))
+		}
+		plan = ilk.Keep
+		if len(plan) == 0 {
+			fmt.Fprintln(w, "Nothing to prune (all candidates protected by llm-serve).")
+			return nil
+		}
 	}
 
 	renderPrunePlan(w, plan)

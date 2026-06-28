@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/internal/tui"
+	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"

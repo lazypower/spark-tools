@@ -18,10 +18,10 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "llm-run",
-		Short:   "llama.cpp wrapper for humans",
-		Long:    "llm-run — run LLMs locally with smart defaults, model resolution via hfetch, and persistent profiles.",
-		Version: version.Version,
+		Use:           "llm-run",
+		Short:         "llama.cpp wrapper for humans",
+		Long:          "llm-run — run LLMs locally with smart defaults, model resolution via hfetch, and persistent profiles.",
+		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

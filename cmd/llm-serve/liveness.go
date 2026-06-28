@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,7 +15,7 @@ import (
 )
 
 func livenessCmd() *cobra.Command {
-	var protectedOnly bool
+	var protectedOnly, check bool
 	cmd := &cobra.Command{
 		Use:   "liveness [name]",
 		Short: "Report which model artifacts are protected from eviction (derived live)",
@@ -25,6 +28,23 @@ func livenessCmd() *cobra.Command {
 			lv := llmserve.NewLiveness(stateDir)
 			out := cmd.OutOrStdout()
 			ctx := context.Background()
+
+			// --check: the interlock contract. Read candidate paths from stdin (one
+			// per line), print the PROTECTED subset to stdout, the unmanaged-container
+			// complaints to stderr. The overlap is computed here (one authority), so a
+			// consumer (llm-tidy) never reimplements it.
+			if check {
+				candidates, err := readLines(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				protected, report := lv.FilterProtected(ctx, candidates)
+				printUnmanaged(cmd.ErrOrStderr(), report)
+				for _, p := range protected {
+					fmt.Fprintln(out, p)
+				}
+				return nil
+			}
 
 			if protectedOnly {
 				keys, all := lv.ProtectedArtifacts(ctx)
@@ -69,7 +89,21 @@ func livenessCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&protectedOnly, "protected-artifacts", false, "print only the protected artifact paths (one per line, machine-readable)")
+	cmd.Flags().BoolVar(&check, "check", false, "read candidate paths from stdin, print the PROTECTED subset to stdout (the llm-tidy interlock contract)")
 	return cmd
+}
+
+// readLines reads non-empty trimmed lines from r.
+func readLines(r io.Reader) ([]string, error) {
+	var out []string
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		if line := strings.TrimSpace(sc.Text()); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out, sc.Err()
 }
 
 // printUnmanaged warns about unlabeled running containers that bind-mount host
