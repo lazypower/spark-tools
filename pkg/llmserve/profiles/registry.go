@@ -52,6 +52,25 @@ var builtins = []ArchProfile{
 			asserted(serving.Vision, true), // Qwen3.6 vision
 		},
 	},
+	// Qwen3.5/3.6 MoE text variants (run.sh qwen-35b / qwen-36b / qwen-36b-fp4 —
+	// the latter is the DEFAULT_MODEL). One entry unlocks all three: they report the
+	// same arch and differ only by quant, which the probe derives. Same Qwen3
+	// reasoning + qwen3_coder tool contract as the Qwen3 MoE family (Qwen tokenizer
+	// required, else the tool parser 500s), but TEXT-ONLY — distinct from the
+	// vision-capable Qwen3VLMoeForConditionalGeneration (note the absent "VL"), so it
+	// carries Vision:false and stands as its own profile rather than a Qwen3Moe alt.
+	{
+		Arch:                        "Qwen3_5MoeForConditionalGeneration",
+		ReasoningParser:             "qwen3",
+		ToolCallParser:              "qwen3_coder",
+		ToolParserRequiresTokenizer: serving.TokenizerQwen,
+		Claims: []Claim{
+			asserted(serving.GuidedDecoding, true),
+			asserted(serving.Thinking, true),
+			asserted(serving.ToolCalling, true),
+			asserted(serving.Vision, false),
+		},
+	},
 	// Nemotron-H — trust-remote-code (ships *.py modeling modules); reasoning via
 	// the nano_v3 parser plugin. No Qwen tool parser.
 	{

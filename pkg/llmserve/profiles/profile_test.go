@@ -45,6 +45,17 @@ func TestLookup_CanonicalAndAlt(t *testing.T) {
 	if _, ok := Lookup("NopeForCausalLM"); ok {
 		t.Error("unknown arch must not resolve")
 	}
+	// Qwen3.5/3.6 MoE text arch (run.sh DEFAULT_MODEL qwen-36b-fp4 + qwen-36b/35b)
+	// must resolve, and as a text-only profile must NOT claim vision.
+	q35, ok := Lookup("Qwen3_5MoeForConditionalGeneration")
+	if !ok {
+		t.Fatal("Qwen3.5 MoE arch (DEFAULT_MODEL) must resolve to a profile")
+	}
+	for _, cl := range q35.Claims {
+		if cl.Capability == serving.Vision && cl.Supported {
+			t.Error("Qwen3.5 MoE is text-only — vision must not be claimed")
+		}
+	}
 	// GLM-4.7-Flash (Glm4MoeLite) must resolve to the GLM profile, not be refused.
 	if _, ok := Lookup("Glm4MoeLiteForCausalLM"); !ok {
 		t.Error("Glm4MoeLite (GLM-4.7-Flash) must resolve to the GLM profile")
