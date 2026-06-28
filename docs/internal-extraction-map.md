@@ -418,3 +418,39 @@ internal/paths — shared XDG/home MECHANISM extracted (no shared policy).
   policy is intentionally chosen.
 - **llm-bench** (`pkg/llmbench/config.Dirs`) is out of the named phase-2 scope;
   it still has its own copy and can delegate to internal/paths in a later pass.
+
+## Phase 3 Extraction Log
+
+Pure-leaf domain tier (risk-plan phase 1). All safe relocations of self-contained,
+well-tested packages; behavior preserved; pkg/* kept as alias wrappers.
+
+### Moved
+- **`internal/modelmeta`** ← `pkg/hfetch/quant` (ParseQuant/QuantInfo).
+- **`internal/fileset`** ← `pkg/hfetch/fileset` (Verify completeness gate +
+  SelectVLLM). Still imports `pkg/hfetch/api` (api not yet extracted).
+- **`internal/gguf`** ← `pkg/hfetch/gguf` (parse/filter/fit/merge/shard,
+  ParseQuantFromFilename, QuantBitsPerWeight). Self-contained, 11 consumers
+  shielded by a full alias wrapper.
+
+## Extraction Status (live)
+
+Extracted to internal/ (with pkg/* compat wrappers, all green):
+- Infra: `version`, `progress`, `tui`, `ui`, `paths` (mechanism), `tidymanifest`.
+- Pure-leaf domain: `modelmeta`, `fileset`, `gguf`.
+
+NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
+1. Config/pure tier: `hftoken` (hfetch token resolution), `hardware`,
+   `runconfig` (llm-run config + profiles), `servecontract`, `servespec`.
+2. State/registry: `modelstore` (hfetch/registry), `serveinstance`
+   (llmserve/instance), `inventory`, `reconcile`.
+3. Network/host-bound (ISOLATE BEHIND INJECTABLE INTERFACES FIRST): `hub`
+   (hfetch/api), `download`, `ollama`, `openaiapi`, `llamacpp` (llmrun/engine),
+   `servehost` (llmserve/runtime+lifecycle; already has Runtime/Prober ifaces),
+   `eviction` (llmserve/liveness + llmtidy/interlock contract), `inference`
+   (cmd/llm-run orchestration).
+
+Duplicate authorities still to COLLAPSE (behavior-sensitive — not yet done):
+- CLI `runPull` vs `pkg/hfetch.Client.Pull` (richer CLI behavior; blocked on a
+  base-URL seam in `newAPIClient` — see seam audit). One pull authority wanted.
+- CLI `runPrune` interlock vs `pkg/llmtidy.Tidy.Prune` (competing eviction
+  path). One prune authority wanted.
