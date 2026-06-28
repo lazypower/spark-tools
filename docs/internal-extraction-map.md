@@ -434,15 +434,25 @@ well-tested packages; behavior preserved; pkg/* kept as alias wrappers.
 
 ## Extraction Status (live)
 
-Extracted to internal/ (with pkg/* compat wrappers, all green):
+Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed):
 - Infra: `version`, `progress`, `tui`, `ui`, `paths` (mechanism), `tidymanifest`.
 - Pure-leaf domain: `modelmeta`, `fileset`, `gguf`.
+- State: `modelstore` (← pkg/hfetch/registry).
+- Serve foundation: `fingerprint` (← pkg/llmserve/fingerprint).
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
-1. Config/pure tier: `hftoken` (hfetch token resolution), `hardware`,
-   `runconfig` (llm-run config + profiles), `servecontract`, `servespec`.
-2. State/registry: `modelstore` (hfetch/registry), `serveinstance`
-   (llmserve/instance), `inventory`, `reconcile`.
+1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
+   profiles), `servecontract`, `servespec`.
+   - `hftoken` BLOCKED: token.go reads config.Dirs() for the token path (honoring
+     HFETCH_HOME/HFETCH_CONFIG_DIR), so internal/hftoken would form a
+     config<->hftoken import cycle. Needs a small enabling refactor first: inject
+     the config dir into the resolver (keep config.ResolveToken's public signature;
+     have it pass Dirs().Config down). Behavior-sensitive — do under codex.
+   - `hardware` couples to pkg/llmrun/engine (RunConfig); extract after/with engine
+     to avoid a temporary cross-layer import.
+2. State: `serveinstance` (llmserve/instance), `inventory`, `reconcile` (both
+   llmtidy; now depend on the already-internal modelstore + tidymanifest, so
+   relatively clean next picks).
 3. Network/host-bound (ISOLATE BEHIND INJECTABLE INTERFACES FIRST): `hub`
    (hfetch/api), `download`, `ollama`, `openaiapi`, `llamacpp` (llmrun/engine),
    `servehost` (llmserve/runtime+lifecycle; already has Runtime/Prober ifaces),
