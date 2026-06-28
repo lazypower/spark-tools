@@ -444,9 +444,13 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   `serveinstance` (← pkg/llmserve/instance — the atomic per-instance manifest store;
   package renamed instance→serveinstance; repointed onto internal/{fingerprint,serving};
   ErrNotFound sentinel preserved by identity in the wrapper).
-- Network leaf: `ollama` (← pkg/llmtidy/ollama — minimal Ollama REST client; already
+- Network leaves: `ollama` (← pkg/llmtidy/ollama — minimal Ollama REST client; already
   injectable via WithHTTPClient + httptest-covered, so the host-bound-seam precondition
-  was already met; stdlib-only byte-identical move).
+  was already met; stdlib-only byte-identical move),
+  `download` (← pkg/hfetch/download — the resumable chunked downloader: range fallback,
+  rate limiting, disk-space checks, resumable ChunkState, SHA-256 verify; stdlib-only,
+  zero intra-repo deps, byte-identical move incl. the build-tagged diskspace_{unix,
+  windows}.go; ErrRangeNotSupported sentinel preserved by identity).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync
