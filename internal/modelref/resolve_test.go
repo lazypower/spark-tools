@@ -1,4 +1,4 @@
-package resolver
+package modelref
 
 import (
 	"context"
@@ -7,16 +7,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 // setupTestRegistry creates a temporary hfetch registry with the given
 // models populated in the manifest.
-func setupTestRegistry(t *testing.T, models []registry.LocalModel) string {
+func setupTestRegistry(t *testing.T, models []modelstore.LocalModel) string {
 	t.Helper()
 	dataDir := t.TempDir()
 
-	manifest := registry.Manifest{
+	manifest := modelstore.Manifest{
 		SchemaVersion: 1,
 		Models:        models,
 	}
@@ -134,10 +134,10 @@ func TestResolveModel_Alias(t *testing.T) {
 	createDummyGGUF(t, modelPath)
 
 	// Set up the registry with the target model.
-	regDir := setupTestRegistry(t, []registry.LocalModel{
+	regDir := setupTestRegistry(t, []modelstore.LocalModel{
 		{
 			ID: "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF",
-			Files: []registry.LocalFile{
+			Files: []modelstore.LocalFile{
 				{
 					Filename:     "Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
 					Quantization: "Q4_K_M",
@@ -186,10 +186,10 @@ func TestResolveModel_RegistryRef(t *testing.T) {
 	modelPath := filepath.Join(modelDir, "model.gguf")
 	createDummyGGUF(t, modelPath)
 
-	regDir := setupTestRegistry(t, []registry.LocalModel{
+	regDir := setupTestRegistry(t, []modelstore.LocalModel{
 		{
 			ID: "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF",
-			Files: []registry.LocalFile{
+			Files: []modelstore.LocalFile{
 				{
 					Filename:     "Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
 					Quantization: "Q4_K_M",
@@ -235,10 +235,10 @@ func TestResolveModel_RegistryRefNoQuant(t *testing.T) {
 	modelPath := filepath.Join(modelDir, "model.gguf")
 	createDummyGGUF(t, modelPath)
 
-	regDir := setupTestRegistry(t, []registry.LocalModel{
+	regDir := setupTestRegistry(t, []modelstore.LocalModel{
 		{
 			ID: "bartowski/SomeModel-GGUF",
-			Files: []registry.LocalFile{
+			Files: []modelstore.LocalFile{
 				{
 					Filename:     "SomeModel-Q4_K_M.gguf",
 					Quantization: "Q4_K_M",
@@ -268,10 +268,10 @@ func TestResolveModel_HFPrefix(t *testing.T) {
 	modelPath := filepath.Join(modelDir, "model.gguf")
 	createDummyGGUF(t, modelPath)
 
-	regDir := setupTestRegistry(t, []registry.LocalModel{
+	regDir := setupTestRegistry(t, []modelstore.LocalModel{
 		{
 			ID: "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF",
-			Files: []registry.LocalFile{
+			Files: []modelstore.LocalFile{
 				{
 					Filename:     "Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
 					Quantization: "Q4_K_M",
@@ -361,10 +361,10 @@ func TestParseRegistryRef(t *testing.T) {
 }
 
 func TestResolveModel_RegistryRefIncompleteFile(t *testing.T) {
-	regDir := setupTestRegistry(t, []registry.LocalModel{
+	regDir := setupTestRegistry(t, []modelstore.LocalModel{
 		{
 			ID: "org/model",
-			Files: []registry.LocalFile{
+			Files: []modelstore.LocalFile{
 				{
 					Filename:     "model-Q4_K_M.gguf",
 					Quantization: "Q4_K_M",

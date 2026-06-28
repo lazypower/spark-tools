@@ -1,6 +1,6 @@
-// Package resolver parses model references and resolves them to
+// Package modelref parses model references and resolves them to
 // local file paths via aliases, hfetch registry, or direct paths.
-package resolver
+package modelref
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/gguf"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 // ResolveSource describes how a model reference was resolved.
@@ -113,7 +113,7 @@ func (r *Resolver) resolveHFURI(_ context.Context, ref string) (*ResolvedModel, 
 	modelID, quant := parseRegistryRef(stripped)
 
 	// Check if already in the local registry.
-	reg := registry.New(r.registryDataDir)
+	reg := modelstore.New(r.registryDataDir)
 	if err := reg.Load(); err != nil {
 		return nil, fmt.Errorf("loading hfetch registry: %w", err)
 	}
@@ -205,7 +205,7 @@ func (r *Resolver) resolveAlias(ctx context.Context, ref string) (*ResolvedModel
 func (r *Resolver) resolveRegistryRef(_ context.Context, ref string) (*ResolvedModel, error) {
 	modelID, quant := parseRegistryRef(ref)
 
-	reg := registry.New(r.registryDataDir)
+	reg := modelstore.New(r.registryDataDir)
 	if err := reg.Load(); err != nil {
 		return nil, fmt.Errorf("loading hfetch registry: %w", err)
 	}
@@ -243,7 +243,7 @@ func parseRegistryRef(ref string) (modelID, quant string) {
 // For split models (multiple shards with the same quant), the path to
 // the first shard is returned (sorted lexically, so -00001-of-N wins).
 // llama.cpp locates sibling shards automatically.
-func (r *Resolver) findInRegistry(reg *registry.Registry, modelID, quant string) string {
+func (r *Resolver) findInRegistry(reg *modelstore.Registry, modelID, quant string) string {
 	model := reg.Get(modelID)
 	if model == nil {
 		return ""

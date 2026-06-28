@@ -469,6 +469,10 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   network call, Download translates hub.IsRangeNotSupported into the download
   ErrRangeNotSupported sentinel; package renamed source→hubsource; repointed
   api→internal/hub + download→internal/download).
+- llm-run model-reference tier: `modelref` (← pkg/llmrun/resolver — the model-reference
+  resolver: local paths, aliases, hfetch registry refs, hf:// URIs, + the alias store
+  CRUD; package renamed resolver→modelref; repointed registry→internal/modelstore
+  (registry.→modelstore., 2 prose comments reverted) and gguf→internal/gguf).
 - llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
   enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
   `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync
