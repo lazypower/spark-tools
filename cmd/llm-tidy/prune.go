@@ -146,6 +146,7 @@ func renderPrunePlan(w io.Writer, plan []llmtidy.InstalledModel) {
 
 	ollama := modelsBy(plan, inventory.BackendOllama)
 	gguf := modelsBy(plan, inventory.BackendGGUF)
+	vllm := modelsBy(plan, inventory.BackendVLLM)
 	if len(ollama) > 0 {
 		fmt.Fprintln(w, "Ollama:")
 		for _, m := range ollama {
@@ -155,6 +156,12 @@ func renderPrunePlan(w io.Writer, plan []llmtidy.InstalledModel) {
 	if len(gguf) > 0 {
 		fmt.Fprintln(w, "GGUF:")
 		for _, m := range gguf {
+			fmt.Fprintf(w, "  %-42s %10s\n", m.Name, formatSize(m.Size))
+		}
+	}
+	if len(vllm) > 0 {
+		fmt.Fprintln(w, "vLLM:")
+		for _, m := range vllm {
 			fmt.Fprintf(w, "  %-42s %10s\n", m.Name, formatSize(m.Size))
 		}
 	}

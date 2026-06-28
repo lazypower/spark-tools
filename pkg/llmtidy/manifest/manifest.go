@@ -19,6 +19,7 @@ type Manifest struct {
 	Version int               `yaml:"version"`
 	Ollama  []OllamaModelSpec `yaml:"ollama,omitempty"`
 	GGUF    []GGUFModelSpec   `yaml:"gguf,omitempty"`
+	VLLM    []VLLMModelSpec   `yaml:"vllm,omitempty"`
 }
 
 // OllamaModelSpec declares a model that should exist in Ollama.
@@ -30,6 +31,12 @@ type OllamaModelSpec struct {
 type GGUFModelSpec struct {
 	Repo  string `yaml:"repo"`
 	Quant string `yaml:"quant,omitempty"`
+}
+
+// VLLMModelSpec declares an HF-format (safetensors) model that should exist in
+// the hfetch registry — matched by repo id.
+type VLLMModelSpec struct {
+	Repo string `yaml:"repo"`
 }
 
 // NormalizedName returns the Ollama spec name with ":latest" appended when no

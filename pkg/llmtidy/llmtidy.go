@@ -109,7 +109,7 @@ func New(opts ...Option) (*Tidy, error) {
 
 	return &Tidy{
 		manifestPath: path,
-		provider:     &inventory.Provider{Ollama: oc, GGUF: reg},
+		provider:     &inventory.Provider{Ollama: oc, GGUF: reg, VLLM: reg},
 		hfetch:       cfg.hfetchClient,
 		checker:      checker,
 	}, nil
@@ -246,6 +246,14 @@ func (t *Tidy) Promote(ctx context.Context, model string, backend Backend) error
 			}
 		}
 		m.GGUF = append(m.GGUF, spec)
+	case inventory.BackendVLLM:
+		spec := manifest.VLLMModelSpec{Repo: match.Repo}
+		for _, existing := range m.VLLM {
+			if strings.EqualFold(existing.Repo, spec.Repo) {
+				return fmt.Errorf("vllm %s already in manifest", spec.Repo)
+			}
+		}
+		m.VLLM = append(m.VLLM, spec)
 	}
 
 	return t.SaveManifest(m)
@@ -276,6 +284,12 @@ func (t *Tidy) Demote(_ context.Context, model string) error {
 		}
 		m.GGUF = append(m.GGUF[:i], m.GGUF[i+1:]...)
 		return t.SaveManifest(m)
+	}
+	for i, spec := range m.VLLM {
+		if strings.EqualFold(spec.Repo, model) || strings.EqualFold(spec.Repo, repoPart) {
+			m.VLLM = append(m.VLLM[:i], m.VLLM[i+1:]...)
+			return t.SaveManifest(m)
+		}
 	}
 
 	suggestions := nearestMatches(m, model)

@@ -13,6 +13,7 @@ type ModelSpec struct {
 	Backend inventory.ModelBackend
 	Ollama  *manifest.OllamaModelSpec
 	GGUF    *manifest.GGUFModelSpec
+	VLLM    *manifest.VLLMModelSpec
 }
 
 // Name returns a human-readable identifier for the spec.
@@ -31,6 +32,11 @@ func (s ModelSpec) Name() string {
 			return s.GGUF.Repo
 		}
 		return s.GGUF.Repo + " " + s.GGUF.Quant
+	case inventory.BackendVLLM:
+		if s.VLLM == nil {
+			return ""
+		}
+		return s.VLLM.Repo
 	}
 	return ""
 }
@@ -56,6 +62,7 @@ func Diff(m *manifest.Manifest, installed []inventory.InstalledModel) DiffResult
 
 	ollamaSeen := make([]bool, len(m.Ollama))
 	ggufSeen := make([]bool, len(m.GGUF))
+	vllmSeen := make([]bool, len(m.VLLM))
 
 	var blessed, untracked []inventory.InstalledModel
 
@@ -74,6 +81,14 @@ func Diff(m *manifest.Manifest, installed []inventory.InstalledModel) DiffResult
 			for i, spec := range m.GGUF {
 				if matchesGGUF(spec, im) {
 					ggufSeen[i] = true
+					matched = true
+					break
+				}
+			}
+		case inventory.BackendVLLM:
+			for i, spec := range m.VLLM {
+				if matchesVLLM(spec, im) {
+					vllmSeen[i] = true
 					matched = true
 					break
 				}
@@ -97,6 +112,12 @@ func Diff(m *manifest.Manifest, installed []inventory.InstalledModel) DiffResult
 		if !ggufSeen[i] {
 			s := spec
 			missing = append(missing, ModelSpec{Backend: inventory.BackendGGUF, GGUF: &s})
+		}
+	}
+	for i, spec := range m.VLLM {
+		if !vllmSeen[i] {
+			s := spec
+			missing = append(missing, ModelSpec{Backend: inventory.BackendVLLM, VLLM: &s})
 		}
 	}
 
@@ -127,4 +148,9 @@ func matchesGGUF(spec manifest.GGUFModelSpec, im inventory.InstalledModel) bool 
 		return true
 	}
 	return spec.Quant == im.Quant
+}
+
+// matchesVLLM matches a vLLM spec by case-insensitive repo id.
+func matchesVLLM(spec manifest.VLLMModelSpec, im inventory.InstalledModel) bool {
+	return im.Backend == inventory.BackendVLLM && strings.EqualFold(spec.Repo, im.Repo)
 }
