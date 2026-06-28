@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 // VLLMList walks the hfetch registry and returns one InstalledModel per
@@ -17,7 +17,7 @@ import (
 // from a file's LocalPath, NOT the registry default — vLLM models are commonly
 // pulled to a custom `--output` location), which is exactly what llm-serve
 // protects, so the eviction interlock keys on the right path.
-func VLLMList(r *registry.Registry) ([]InstalledModel, error) {
+func VLLMList(r *modelstore.Registry) ([]InstalledModel, error) {
 	if err := r.Load(); err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func VLLMList(r *registry.Registry) ([]InstalledModel, error) {
 // when a dir is shared (two models pulled to one --output, or a mixed
 // gguf+safetensors repo). Any `.gguf` file is left intact so a mixed repo's GGUF
 // model survives. An exclusively-empty model dir is then best-effort removed.
-func VLLMDelete(r *registry.Registry, m InstalledModel) error {
+func VLLMDelete(r *modelstore.Registry, m InstalledModel) error {
 	if err := r.Load(); err != nil {
 		return err
 	}

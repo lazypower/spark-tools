@@ -5,30 +5,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 func seedRegistry(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	r := registry.New(dir)
+	r := modelstore.New(dir)
 	if err := r.Load(); err != nil {
 		t.Fatalf("load empty: %v", err)
 	}
 
 	now := time.Now().UTC()
-	r.AddFile("unsloth/Qwen3.5-122B-A10B-GGUF", registry.LocalFile{
+	r.AddFile("unsloth/Qwen3.5-122B-A10B-GGUF", modelstore.LocalFile{
 		Filename: "model-Q4_K_M.gguf", Size: 46_000_000_000, Quantization: "Q4_K_M",
 		LocalPath: filepath.Join(dir, "models", "unsloth--Qwen3.5", "model-Q4_K_M.gguf"),
 		Complete:  true, DownloadedAt: now,
 	})
-	r.AddFile("unsloth/Qwen3.5-122B-A10B-GGUF", registry.LocalFile{
+	r.AddFile("unsloth/Qwen3.5-122B-A10B-GGUF", modelstore.LocalFile{
 		Filename: "model-Q5_K_M.gguf", Size: 50_000_000_000, Quantization: "Q5_K_M",
 		LocalPath: filepath.Join(dir, "models", "unsloth--Qwen3.5", "model-Q5_K_M.gguf"),
 		Complete:  true, DownloadedAt: now,
 	})
 	// Incomplete file: should be filtered out.
-	r.AddFile("mradermacher/Venus", registry.LocalFile{
+	r.AddFile("mradermacher/Venus", modelstore.LocalFile{
 		Filename: "model-IQ4_XS.gguf", Size: 40_000_000_000,
 		LocalPath: filepath.Join(dir, "models", "mradermacher--Venus", "model-IQ4_XS.gguf"),
 		Complete:  false, DownloadedAt: now,
@@ -41,7 +41,7 @@ func seedRegistry(t *testing.T) string {
 
 func TestGGUFListEmitsOneRowPerCompleteFile(t *testing.T) {
 	dataDir := seedRegistry(t)
-	models, err := GGUFList(registry.New(dataDir))
+	models, err := GGUFList(modelstore.New(dataDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,19 +68,19 @@ func TestGGUFListEmitsOneRowPerCompleteFile(t *testing.T) {
 
 func TestGGUFListDisplayNameIncludesQuant(t *testing.T) {
 	dir := t.TempDir()
-	r := registry.New(dir)
+	r := modelstore.New(dir)
 	_ = r.Load()
-	r.AddFile("Org/Repo", registry.LocalFile{
+	r.AddFile("Org/Repo", modelstore.LocalFile{
 		Filename: "m.gguf", Size: 1, Quantization: "Q4_K_M",
 		LocalPath: filepath.Join(dir, "m.gguf"), Complete: true,
 	})
-	r.AddFile("Org/Other", registry.LocalFile{
+	r.AddFile("Org/Other", modelstore.LocalFile{
 		Filename: "m.gguf", Size: 1,
 		LocalPath: filepath.Join(dir, "m2.gguf"), Complete: true,
 	})
 	_ = r.Save()
 
-	models, err := GGUFList(registry.New(dir))
+	models, err := GGUFList(modelstore.New(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestGGUFListDisplayNameIncludesQuant(t *testing.T) {
 func TestGGUFDeleteRemovesEntry(t *testing.T) {
 	dataDir := seedRegistry(t)
 
-	r := registry.New(dataDir)
+	r := modelstore.New(dataDir)
 	models, err := GGUFList(r)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestGGUFDeleteRemovesEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remaining, err := GGUFList(registry.New(dataDir))
+	remaining, err := GGUFList(modelstore.New(dataDir))
 	if err != nil {
 		t.Fatal(err)
 	}

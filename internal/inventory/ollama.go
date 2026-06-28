@@ -3,7 +3,7 @@ package inventory
 import (
 	"context"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
+	"github.com/lazypower/spark-tools/internal/ollama"
 )
 
 // OllamaList queries the Ollama server and returns its installed models.

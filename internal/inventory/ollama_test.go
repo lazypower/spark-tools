@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
+	"github.com/lazypower/spark-tools/internal/ollama"
 )
 
 func TestOllamaListConvertsModels(t *testing.T) {

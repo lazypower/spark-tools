@@ -1,122 +1,61 @@
+// Package inventory is a compatibility wrapper over internal/inventory. The
+// installed-model enumeration across the Ollama/GGUF/vLLM backends moved to
+// internal/inventory during the /internal extraction; this thin alias keeps
+// existing importers (pkg/llmtidy, pkg/llmtidy/{interlock,reconcile},
+// cmd/llm-tidy, pkg/seam) compiling unchanged until they migrate. Type aliases
+// carry the Provider/ModelBackend methods over; the backend list/delete funcs
+// and ParseBackend delegate to the authority.
+//
+// Deprecated: import github.com/lazypower/spark-tools/internal/inventory.
 package inventory
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
+	iinv "github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/modelstore"
+	"github.com/lazypower/spark-tools/internal/ollama"
 )
 
-// Provider exposes installed models across every backend. GGUF and VLLM share
-// one hfetch registry (they are the same store, distinguished by file type).
-type Provider struct {
-	Ollama *ollama.Client
-	GGUF   *registry.Registry
-	VLLM   *registry.Registry
+// Type aliases — carry methods (ModelBackend.String, Provider.Probe/All/
+// AllByBackend/Delete) over and keep values flowing across the boundary as the
+// same type.
+type (
+	ModelBackend   = iinv.ModelBackend
+	InstalledModel = iinv.InstalledModel
+	Provider       = iinv.Provider
+	Available      = iinv.Available
+)
+
+// Backend enum.
+const (
+	BackendUnknown = iinv.BackendUnknown
+	BackendOllama  = iinv.BackendOllama
+	BackendGGUF    = iinv.BackendGGUF
+	BackendVLLM    = iinv.BackendVLLM
+)
+
+// ParseBackend converts a CLI flag value to a ModelBackend.
+func ParseBackend(s string) (ModelBackend, error) { return iinv.ParseBackend(s) }
+
+// GGUFList walks the hfetch registry and returns one InstalledModel per .gguf.
+func GGUFList(r *modelstore.Registry) ([]InstalledModel, error) { return iinv.GGUFList(r) }
+
+// GGUFDelete removes a single file from the hfetch registry and disk.
+func GGUFDelete(r *modelstore.Registry, m InstalledModel) error { return iinv.GGUFDelete(r, m) }
+
+// VLLMList walks the hfetch registry and returns one InstalledModel per vLLM dir.
+func VLLMList(r *modelstore.Registry) ([]InstalledModel, error) { return iinv.VLLMList(r) }
+
+// VLLMDelete removes a vLLM model directory via the registry.
+func VLLMDelete(r *modelstore.Registry, m InstalledModel) error { return iinv.VLLMDelete(r, m) }
+
+// OllamaList queries the Ollama server and returns its installed models.
+func OllamaList(ctx context.Context, c *ollama.Client) ([]InstalledModel, error) {
+	return iinv.OllamaList(ctx, c)
 }
 
-// Available reports per-backend availability after a Probe.
-type Available struct {
-	Ollama bool
-	GGUF   bool
-	VLLM   bool
-}
-
-// Probe checks which backends are reachable. Ollama is checked with a
-// short HTTP probe; GGUF and VLLM are "available" if the registry can be loaded.
-func (p *Provider) Probe(ctx context.Context) Available {
-	a := Available{}
-	if p.Ollama != nil {
-		a.Ollama = p.Ollama.Available(ctx)
-	}
-	if p.GGUF != nil {
-		a.GGUF = p.GGUF.Load() == nil
-	}
-	if p.VLLM != nil {
-		a.VLLM = p.VLLM.Load() == nil
-	}
-	return a
-}
-
-// All returns models across every backend the provider has configured. A
-// backend that fails to list contributes its error via the returned
-// multierror; partial inventories are returned alongside.
-func (p *Provider) All(ctx context.Context) ([]InstalledModel, error) {
-	var (
-		out  []InstalledModel
-		errs []error
-	)
-	if p.Ollama != nil {
-		models, err := OllamaList(ctx, p.Ollama)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("ollama: %w", err))
-		} else {
-			out = append(out, models...)
-		}
-	}
-	if p.GGUF != nil {
-		models, err := GGUFList(p.GGUF)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("gguf: %w", err))
-		} else {
-			out = append(out, models...)
-		}
-	}
-	if p.VLLM != nil {
-		models, err := VLLMList(p.VLLM)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("vllm: %w", err))
-		} else {
-			out = append(out, models...)
-		}
-	}
-	return out, errors.Join(errs...)
-}
-
-// AllByBackend filters Provider.All to a single backend.
-func (p *Provider) AllByBackend(ctx context.Context, b ModelBackend) ([]InstalledModel, error) {
-	switch b {
-	case BackendOllama:
-		if p.Ollama == nil {
-			return nil, errors.New("ollama backend not configured")
-		}
-		return OllamaList(ctx, p.Ollama)
-	case BackendGGUF:
-		if p.GGUF == nil {
-			return nil, errors.New("gguf backend not configured")
-		}
-		return GGUFList(p.GGUF)
-	case BackendVLLM:
-		if p.VLLM == nil {
-			return nil, errors.New("vllm backend not configured")
-		}
-		return VLLMList(p.VLLM)
-	default:
-		return nil, fmt.Errorf("unsupported backend %v", b)
-	}
-}
-
-// Delete removes the model via its backend.
-func (p *Provider) Delete(ctx context.Context, m InstalledModel) error {
-	switch m.Backend {
-	case BackendOllama:
-		if p.Ollama == nil {
-			return errors.New("ollama backend not configured")
-		}
-		return OllamaDelete(ctx, p.Ollama, m)
-	case BackendGGUF:
-		if p.GGUF == nil {
-			return errors.New("gguf backend not configured")
-		}
-		return GGUFDelete(p.GGUF, m)
-	case BackendVLLM:
-		if p.VLLM == nil {
-			return errors.New("vllm backend not configured")
-		}
-		return VLLMDelete(p.VLLM, m)
-	default:
-		return fmt.Errorf("unsupported backend %v", m.Backend)
-	}
+// OllamaDelete removes a model via the Ollama REST API.
+func OllamaDelete(ctx context.Context, c *ollama.Client, m InstalledModel) error {
+	return iinv.OllamaDelete(ctx, c, m)
 }

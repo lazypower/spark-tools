@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 // registerModel writes the given files into a real dir and records them in the
 // registry with their LocalPath, returning the model dir.
-func registerModel(t *testing.T, reg *registry.Registry, repo string, files ...string) string {
+func registerModel(t *testing.T, reg *modelstore.Registry, repo string, files ...string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "model")
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -21,7 +21,7 @@ func registerModel(t *testing.T, reg *registry.Registry, repo string, files ...s
 		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		reg.AddFile(repo, registry.LocalFile{Filename: f, Complete: true, LocalPath: p, Size: 1})
+		reg.AddFile(repo, modelstore.LocalFile{Filename: f, Complete: true, LocalPath: p, Size: 1})
 	}
 	if err := reg.Save(); err != nil { // VLLMList/GGUFList reload from disk
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func registerModel(t *testing.T, reg *registry.Registry, repo string, files ...s
 }
 
 func TestVLLMList_SurfacesSafetensorsModel_AtDirGranularity(t *testing.T) {
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestVLLMList_SurfacesSafetensorsModel_AtDirGranularity(t *testing.T) {
 }
 
 func TestVLLMList_ExcludesGGUF_AndGGUFExcludesVLLM(t *testing.T) {
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestVLLMList_ExcludesGGUF_AndGGUFExcludesVLLM(t *testing.T) {
 func TestVLLMDelete_PreservesGGUFInMixedRepo(t *testing.T) {
 	// codex P1: a repo with BOTH .gguf and .safetensors in one dir — pruning the
 	// vLLM row must remove only the safetensors (+ HF sidecars), NEVER the .gguf.
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestVLLMDelete_PreservesGGUFInMixedRepo(t *testing.T) {
 		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		reg.AddFile("org/Mixed", registry.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
+		reg.AddFile("org/Mixed", modelstore.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
 		return p
 	}
 	safet := mk("model.safetensors")
@@ -124,7 +124,7 @@ func TestVLLMDelete_PreservesGGUFInMixedRepo(t *testing.T) {
 func TestVLLMDelete_DoesNotTouchAnotherModelInSharedDir(t *testing.T) {
 	// codex P1: two models pulled to the SAME dir — deleting one must not remove
 	// the other's files (no RemoveAll of the shared dir).
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestVLLMDelete_DoesNotTouchAnotherModelInSharedDir(t *testing.T) {
 		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		reg.AddFile(repo, registry.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
+		reg.AddFile(repo, modelstore.LocalFile{Filename: name, Complete: true, LocalPath: p, Size: 1})
 		return p
 	}
 	mk("org/A", "a.safetensors")
@@ -159,7 +159,7 @@ func TestVLLMDelete_DoesNotTouchAnotherModelInSharedDir(t *testing.T) {
 }
 
 func TestVLLMDelete_RemovesTheModelDir(t *testing.T) {
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
