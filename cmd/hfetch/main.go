@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/progress"
 	"github.com/lazypower/spark-tools/internal/version"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
@@ -76,20 +77,8 @@ func newAPIClient(cmd *cobra.Command) *api.Client {
 }
 
 // formatSize formats bytes as a human-readable string.
-func formatSize(bytes int64) string {
-	const (
-		gb = 1024 * 1024 * 1024
-		mb = 1024 * 1024
-		kb = 1024
-	)
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
-	case bytes >= mb:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
-	case bytes >= kb:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
-	default:
-		return fmt.Sprintf("%d B", bytes)
-	}
-}
+// formatSize delegates to the shared size formatter — the single authority in
+// internal/progress. (The previous local copy was byte-identical; collapsed here
+// to remove a duplicate authority. cmd/llm-run keeps a deliberately DIVERGENT
+// copy with no KB tier — see docs/internal-extraction-map.md.)
+func formatSize(bytes int64) string { return progress.FormatSize(bytes) }
