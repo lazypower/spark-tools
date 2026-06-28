@@ -18,16 +18,30 @@ import (
 // "llm-serve" on PATH. The env override matters because llm-serve is often
 // installed somewhere not on a non-interactive/cron PATH (e.g. ~/.local/bin) —
 // without it, the interlock would mistake "not on PATH" for "not installed" and
-// go inactive (fail-open). With LLM_SERVE_BIN set, "absent" means genuinely absent.
+// go inactive (fail-open).
+//
+// Explicit-config is a fail-CLOSED signal. When the operator names the binary
+// (bin arg or $LLM_SERVE_BIN), they are declaring "llm-serve manages this box";
+// if that named binary then can't be resolved it's a MISCONFIGURATION, not
+// absence — so we return a hard error (caller fails closed, blocks every
+// path-based candidate) rather than ErrLLMServeAbsent. Only the unset default
+// ("llm-serve" not on PATH) means genuinely-not-deployed → inactive, which is the
+// right pass-through for ollama/gguf-only boxes that never ran llm-serve.
 func LLMServeChecker(bin string) Checker {
+	explicit := bin != ""
 	if bin == "" {
-		bin = os.Getenv("LLM_SERVE_BIN")
+		if env := os.Getenv("LLM_SERVE_BIN"); env != "" {
+			bin, explicit = env, true
+		}
 	}
 	if bin == "" {
 		bin = "llm-serve"
 	}
 	return func(ctx context.Context, paths []string) (protected, warnings []string, err error) {
 		if _, err := exec.LookPath(bin); err != nil {
+			if explicit {
+				return nil, nil, fmt.Errorf("llm-serve binary %q is configured but unresolvable (interlock fails closed; fix the path/PATH, or unset LLM_SERVE_BIN to disable the interlock on a box that doesn't run llm-serve): %w", bin, err)
+			}
 			return nil, nil, ErrLLMServeAbsent
 		}
 		cmd := exec.CommandContext(ctx, bin, "liveness", "--check")
