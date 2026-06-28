@@ -4,16 +4,16 @@ package reconcile
 import (
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
 )
 
 // ModelSpec is a manifest entry tagged with its backend.
 type ModelSpec struct {
 	Backend inventory.ModelBackend
-	Ollama  *manifest.OllamaModelSpec
-	GGUF    *manifest.GGUFModelSpec
-	VLLM    *manifest.VLLMModelSpec
+	Ollama  *tidymanifest.OllamaModelSpec
+	GGUF    *tidymanifest.GGUFModelSpec
+	VLLM    *tidymanifest.VLLMModelSpec
 }
 
 // Name returns a human-readable identifier for the spec.
@@ -55,7 +55,7 @@ type DiffResult struct {
 //   - Ollama: exact name match after :latest normalization.
 //   - GGUF: case-insensitive repo. When quant is specified in the manifest,
 //     it must also match; when omitted, any quant from the repo matches.
-func Diff(m *manifest.Manifest, installed []inventory.InstalledModel) DiffResult {
+func Diff(m *tidymanifest.Manifest, installed []inventory.InstalledModel) DiffResult {
 	if m == nil {
 		return DiffResult{Untracked: installed}
 	}
@@ -129,15 +129,15 @@ func Diff(m *manifest.Manifest, installed []inventory.InstalledModel) DiffResult
 }
 
 // matchesOllama implements spec §10.2 Ollama matching.
-func matchesOllama(spec manifest.OllamaModelSpec, im inventory.InstalledModel) bool {
+func matchesOllama(spec tidymanifest.OllamaModelSpec, im inventory.InstalledModel) bool {
 	if im.Backend != inventory.BackendOllama {
 		return false
 	}
-	return spec.NormalizedName() == manifest.NormalizeOllamaName(im.OllamaName)
+	return spec.NormalizedName() == tidymanifest.NormalizeOllamaName(im.OllamaName)
 }
 
 // matchesGGUF implements spec §10.2 GGUF matching.
-func matchesGGUF(spec manifest.GGUFModelSpec, im inventory.InstalledModel) bool {
+func matchesGGUF(spec tidymanifest.GGUFModelSpec, im inventory.InstalledModel) bool {
 	if im.Backend != inventory.BackendGGUF {
 		return false
 	}
@@ -151,6 +151,6 @@ func matchesGGUF(spec manifest.GGUFModelSpec, im inventory.InstalledModel) bool 
 }
 
 // matchesVLLM matches a vLLM spec by case-insensitive repo id.
-func matchesVLLM(spec manifest.VLLMModelSpec, im inventory.InstalledModel) bool {
+func matchesVLLM(spec tidymanifest.VLLMModelSpec, im inventory.InstalledModel) bool {
 	return im.Backend == inventory.BackendVLLM && strings.EqualFold(spec.Repo, im.Repo)
 }

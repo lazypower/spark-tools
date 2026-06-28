@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
+	"github.com/lazypower/spark-tools/internal/inventory"
 )
 
 // PruneEvent is emitted as each model is removed.

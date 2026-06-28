@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
 )
 
 func ollamaModel(name string) inventory.InstalledModel {
@@ -22,7 +22,7 @@ func ggufModel(repo, quant string) inventory.InstalledModel {
 }
 
 func TestDiffOllamaExactMatch(t *testing.T) {
-	m := &manifest.Manifest{Version: 1, Ollama: []manifest.OllamaModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, Ollama: []tidymanifest.OllamaModelSpec{
 		{Name: "qwen3:32b"},
 	}}
 	inv := []inventory.InstalledModel{
@@ -43,7 +43,7 @@ func TestDiffOllamaExactMatch(t *testing.T) {
 
 func TestDiffOllamaLatestImplied(t *testing.T) {
 	// Manifest without :latest must match installed with :latest.
-	m := &manifest.Manifest{Version: 1, Ollama: []manifest.OllamaModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, Ollama: []tidymanifest.OllamaModelSpec{
 		{Name: "llama3.3"},
 	}}
 	inv := []inventory.InstalledModel{ollamaModel("llama3.3:latest")}
@@ -54,7 +54,7 @@ func TestDiffOllamaLatestImplied(t *testing.T) {
 }
 
 func TestDiffOllamaMissingTagged(t *testing.T) {
-	m := &manifest.Manifest{Version: 1, Ollama: []manifest.OllamaModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, Ollama: []tidymanifest.OllamaModelSpec{
 		{Name: "llama3.3:8b"},
 	}}
 	inv := []inventory.InstalledModel{ollamaModel("llama3.3:70b")}
@@ -68,7 +68,7 @@ func TestDiffOllamaMissingTagged(t *testing.T) {
 }
 
 func TestDiffGGUFRepoCaseInsensitive(t *testing.T) {
-	m := &manifest.Manifest{Version: 1, GGUF: []manifest.GGUFModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, GGUF: []tidymanifest.GGUFModelSpec{
 		{Repo: "Unsloth/Qwen3.5-122B-A10B-GGUF", Quant: "Q4_K_M"},
 	}}
 	inv := []inventory.InstalledModel{
@@ -81,7 +81,7 @@ func TestDiffGGUFRepoCaseInsensitive(t *testing.T) {
 }
 
 func TestDiffGGUFQuantSpecificity(t *testing.T) {
-	m := &manifest.Manifest{Version: 1, GGUF: []manifest.GGUFModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, GGUF: []tidymanifest.GGUFModelSpec{
 		{Repo: "org/repo", Quant: "Q4_K_M"},
 	}}
 	inv := []inventory.InstalledModel{
@@ -98,7 +98,7 @@ func TestDiffGGUFQuantSpecificity(t *testing.T) {
 }
 
 func TestDiffGGUFQuantOmittedBlessesAll(t *testing.T) {
-	m := &manifest.Manifest{Version: 1, GGUF: []manifest.GGUFModelSpec{
+	m := &tidymanifest.Manifest{Version: 1, GGUF: []tidymanifest.GGUFModelSpec{
 		{Repo: "org/repo"},
 	}}
 	inv := []inventory.InstalledModel{
@@ -120,15 +120,15 @@ func TestDiffNilManifestEverythingUntracked(t *testing.T) {
 }
 
 func TestModelSpecName(t *testing.T) {
-	o := ModelSpec{Backend: inventory.BackendOllama, Ollama: &manifest.OllamaModelSpec{Name: "llama3.3"}}
+	o := ModelSpec{Backend: inventory.BackendOllama, Ollama: &tidymanifest.OllamaModelSpec{Name: "llama3.3"}}
 	if got := o.Name(); got != "llama3.3:latest" {
 		t.Errorf("Ollama Name = %q", got)
 	}
-	g1 := ModelSpec{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "Org/Repo", Quant: "Q4_K_M"}}
+	g1 := ModelSpec{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "Org/Repo", Quant: "Q4_K_M"}}
 	if got := g1.Name(); got != "Org/Repo Q4_K_M" {
 		t.Errorf("GGUF Name = %q", got)
 	}
-	g2 := ModelSpec{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "Org/Repo"}}
+	g2 := ModelSpec{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "Org/Repo"}}
 	if got := g2.Name(); got != "Org/Repo" {
 		t.Errorf("GGUF bare Name = %q", got)
 	}
@@ -160,8 +160,8 @@ func TestPrunePlanFiltersAge(t *testing.T) {
 
 func TestSyncPlanFiltersBackend(t *testing.T) {
 	d := DiffResult{Missing: []ModelSpec{
-		{Backend: inventory.BackendOllama, Ollama: &manifest.OllamaModelSpec{Name: "a"}},
-		{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "b"}},
+		{Backend: inventory.BackendOllama, Ollama: &tidymanifest.OllamaModelSpec{Name: "a"}},
+		{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "b"}},
 	}}
 	gguf := inventory.BackendGGUF
 	plan := SyncPlan(d, SyncOptions{Backend: &gguf})

@@ -444,6 +444,14 @@ Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed
   `serveinstance` (← pkg/llmserve/instance — the atomic per-instance manifest store;
   package renamed instance→serveinstance; repointed onto internal/{fingerprint,serving};
   ErrNotFound sentinel preserved by identity in the wrapper).
+- Network leaf: `ollama` (← pkg/llmtidy/ollama — minimal Ollama REST client; already
+  injectable via WithHTTPClient + httptest-covered, so the host-bound-seam precondition
+  was already met; stdlib-only byte-identical move).
+- llm-tidy domain: `inventory` (← pkg/llmtidy/inventory — Ollama/GGUF/vLLM installed-model
+  enumeration + delete; repointed registry→modelstore and ollama→internal/ollama),
+  `reconcile` (← pkg/llmtidy/reconcile — manifest-vs-inventory diff + prune/sync
+  plan+apply; repointed inventory→internal/inventory, manifest→internal/tidymanifest,
+  ollama→internal/ollama).
 
 NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
 1. Config/pure tier: `hftoken`, `hardware`, `runconfig` (llm-run config +
@@ -455,10 +463,12 @@ NOT yet extracted (remaining, dependency order) — see Risk-ranked plan above:
      have it pass Dirs().Config down). Behavior-sensitive — do under codex.
    - `hardware` couples to pkg/llmrun/engine (RunConfig); extract after/with engine
      to avoid a temporary cross-layer import.
-2. State: `inventory`, `reconcile` (both llmtidy; now depend on the
-   already-internal modelstore + tidymanifest, so relatively clean next picks).
-   (`serveinstance` DONE — note: instance depended on the serving vocab + fingerprint,
-   not on modelstore/tidymanifest; serving was extracted first to unblock it.)
+2. State: `serveinstance`, `inventory`, `reconcile` — ALL DONE. Notes on the actual
+   graph (the original "depend only on modelstore/tidymanifest" note was imprecise):
+   - `serveinstance` depended on the serving vocab + fingerprint (not modelstore/
+     tidymanifest); `serving` was extracted first to unblock it.
+   - `inventory`/`reconcile` concretely depend on `*ollama.Client`; `ollama` (a clean
+     already-injectable stdlib-only network leaf) was extracted first to unblock them.
 3. Network/host-bound (ISOLATE BEHIND INJECTABLE INTERFACES FIRST): `hub`
    (hfetch/api), `download`, `ollama`, `openaiapi`, `llamacpp` (llmrun/engine),
    `servehost` (llmserve/runtime+lifecycle; already has Runtime/Prober ifaces),

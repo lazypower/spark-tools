@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
+	"github.com/lazypower/spark-tools/internal/ollama"
 )
 
 func TestPruneSuccessAggregatesBytes(t *testing.T) {
@@ -106,8 +106,8 @@ func (f *fakeSyncer) PullGGUF(_ context.Context, repo, quant string, onStatus fu
 func TestSyncDispatchesPerBackend(t *testing.T) {
 	syncer := &fakeSyncer{}
 	plan := []ModelSpec{
-		{Backend: inventory.BackendOllama, Ollama: &manifest.OllamaModelSpec{Name: "qwen3"}},
-		{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "org/repo", Quant: "Q4_K_M"}},
+		{Backend: inventory.BackendOllama, Ollama: &tidymanifest.OllamaModelSpec{Name: "qwen3"}},
+		{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "org/repo", Quant: "Q4_K_M"}},
 	}
 
 	var events []SyncEvent
@@ -131,9 +131,9 @@ func TestSyncDispatchesPerBackend(t *testing.T) {
 func TestSyncPropagatesPerSpecError(t *testing.T) {
 	syncer := &fakeSyncer{failOnRepo: "bad/repo"}
 	plan := []ModelSpec{
-		{Backend: inventory.BackendOllama, Ollama: &manifest.OllamaModelSpec{Name: "ok"}},
-		{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "bad/repo", Quant: "Q4_K_M"}},
-		{Backend: inventory.BackendGGUF, GGUF: &manifest.GGUFModelSpec{Repo: "good/repo", Quant: "Q4_K_M"}},
+		{Backend: inventory.BackendOllama, Ollama: &tidymanifest.OllamaModelSpec{Name: "ok"}},
+		{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "bad/repo", Quant: "Q4_K_M"}},
+		{Backend: inventory.BackendGGUF, GGUF: &tidymanifest.GGUFModelSpec{Repo: "good/repo", Quant: "Q4_K_M"}},
 	}
 
 	err := Sync(context.Background(), syncer, plan, nil)

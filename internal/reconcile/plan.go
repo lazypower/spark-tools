@@ -3,7 +3,7 @@ package reconcile
 import (
 	"time"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
+	"github.com/lazypower/spark-tools/internal/inventory"
 )
 
 // PruneOptions filters which untracked models become prune candidates.
