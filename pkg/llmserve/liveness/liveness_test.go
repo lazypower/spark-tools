@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
@@ -52,11 +52,11 @@ func runningContainer(name, hostPath string) runtime.ServiceState {
 	}}
 }
 
-func storeWith(t *testing.T, dirs map[string]string) *instance.Store {
+func storeWith(t *testing.T, dirs map[string]string) *serveinstance.Store {
 	t.Helper()
-	s := instance.NewStore(t.TempDir())
+	s := serveinstance.NewStore(t.TempDir())
 	for name, dir := range dirs {
-		if err := s.Save(instance.Instance{Desired: instance.Desired{Name: name, ModelDir: dir}}); err != nil {
+		if err := s.Save(serveinstance.Instance{Desired: serveinstance.Desired{Name: name, ModelDir: dir}}); err != nil {
 			t.Fatal(err)
 		}
 	}

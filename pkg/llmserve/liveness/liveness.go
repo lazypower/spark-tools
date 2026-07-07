@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
@@ -24,12 +24,12 @@ import (
 // Liveness derives eviction protection from the manifest store (intent) and the
 // runtime (live containers).
 type Liveness struct {
-	Store   *instance.Store
+	Store   *serveinstance.Store
 	Runtime runtime.Runtime
 }
 
 // New builds a Liveness over a manifest store and a runtime.
-func New(store *instance.Store, rt runtime.Runtime) *Liveness {
+func New(store *serveinstance.Store, rt runtime.Runtime) *Liveness {
 	return &Liveness{Store: store, Runtime: rt}
 }
 
@@ -265,7 +265,7 @@ func (l *Liveness) Instance(ctx context.Context, name string) (InstanceLiveness,
 	switch {
 	case err == nil:
 		out.HasManifest = true
-	case errors.Is(err, instance.ErrNotFound):
+	case errors.Is(err, serveinstance.ErrNotFound):
 		// no manifest — may still have a running orphan container
 	default:
 		return out, err

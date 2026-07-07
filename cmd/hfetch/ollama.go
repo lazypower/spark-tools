@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/internal/gguf"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 func ollamaImportCmd() *cobra.Command {
@@ -152,7 +152,7 @@ func resolveModelFile(ref string) (string, string, string, error) {
 	modelID, quant := parseModelRef(ref)
 
 	dirs := config.Dirs()
-	reg := registry.New(dirs.Data)
+	reg := modelstore.New(dirs.Data)
 	if err := reg.Load(); err != nil {
 		return "", "", "", err
 	}
@@ -163,7 +163,7 @@ func resolveModelFile(ref string) (string, string, string, error) {
 	}
 
 	// Filter to complete GGUF files.
-	var ggufFiles []registry.LocalFile
+	var ggufFiles []modelstore.LocalFile
 	for _, f := range model.Files {
 		if f.Complete && gguf.IsGGUF(f.Filename) {
 			ggufFiles = append(ggufFiles, f)
@@ -175,7 +175,7 @@ func resolveModelFile(ref string) (string, string, string, error) {
 
 	// Filter by quant if specified.
 	if quant != "" {
-		var matched []registry.LocalFile
+		var matched []modelstore.LocalFile
 		for _, f := range ggufFiles {
 			if strings.EqualFold(f.Quantization, quant) {
 				matched = append(matched, f)
@@ -206,7 +206,7 @@ func resolveModelFile(ref string) (string, string, string, error) {
 }
 
 // handleSplitModel merges split GGUF shards and returns the merged file path.
-func handleSplitModel(files []registry.LocalFile, modelID, quant, dataDir string) (string, string, string, error) {
+func handleSplitModel(files []modelstore.LocalFile, modelID, quant, dataDir string) (string, string, string, error) {
 	// Sort shards by filename to ensure correct order.
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Filename < files[j].Filename
@@ -624,7 +624,7 @@ func toInt(v any) int {
 	}
 }
 
-func availableQuants(files []registry.LocalFile) []string {
+func availableQuants(files []modelstore.LocalFile) []string {
 	seen := make(map[string]bool)
 	var quants []string
 	for _, f := range files {

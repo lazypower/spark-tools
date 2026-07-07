@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/internal/ollama"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
 )
 
 // deadOllamaURL returns the URL of an Ollama server that has been shut down, so
@@ -30,7 +30,7 @@ func deadOllamaURL(t *testing.T) string {
 // wrapped in *PartialInventoryError so callers can skip-with-warning.
 func TestDiffToleratesUnreachableBackend(t *testing.T) {
 	tidy, _ := newTestTidy(t, deadOllamaURL(t))
-	if err := tidy.SaveManifest(&Manifest{Version: manifest.SchemaVersion}); err != nil {
+	if err := tidy.SaveManifest(&Manifest{Version: tidymanifest.SchemaVersion}); err != nil {
 		t.Fatal(err)
 	}
 	d, err := tidy.Diff(context.Background())
@@ -48,7 +48,7 @@ func TestDiffToleratesUnreachableBackend(t *testing.T) {
 // what the reachable backends reported (here, nothing).
 func TestPruneToleratesUnreachableBackend(t *testing.T) {
 	tidy, _ := newTestTidy(t, deadOllamaURL(t))
-	if err := tidy.SaveManifest(&Manifest{Version: manifest.SchemaVersion}); err != nil {
+	if err := tidy.SaveManifest(&Manifest{Version: tidymanifest.SchemaVersion}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := tidy.Prune(context.Background(), nil); err != nil {
@@ -57,11 +57,11 @@ func TestPruneToleratesUnreachableBackend(t *testing.T) {
 }
 
 // newTestTidy builds a Tidy that talks to the given httptest server for
-// Ollama and uses a temp dir for both the manifest and the hfetch registry.
+// Ollama and uses a temp dir for both the manifest and the hfetch modelstore.
 func newTestTidy(t *testing.T, ollamaURL string) (*Tidy, string) {
 	t.Helper()
 	dir := t.TempDir()
-	manifestPath := filepath.Join(dir, "manifest.yaml")
+	manifestPath := filepath.Join(dir, "tidymanifest.yaml")
 	dataDir := filepath.Join(dir, "hfetch")
 	t.Setenv("HFETCH_DATA_DIR", dataDir)
 
@@ -69,7 +69,7 @@ func newTestTidy(t *testing.T, ollamaURL string) (*Tidy, string) {
 		manifestPath: manifestPath,
 		provider: &inventory.Provider{
 			Ollama: ollama.New(ollamaURL),
-			GGUF:   registry.New(dataDir),
+			GGUF:   modelstore.New(dataDir),
 		},
 	}
 	return tidy, dir
@@ -142,7 +142,7 @@ func TestInitWritesFromInventory(t *testing.T) {
 	if len(m.Ollama) != 1 || m.Ollama[0].Name != "qwen3:32b" {
 		t.Errorf("Init manifest = %+v", m)
 	}
-	if m.Version != manifest.SchemaVersion {
+	if m.Version != tidymanifest.SchemaVersion {
 		t.Errorf("Version = %d", m.Version)
 	}
 	loaded, err := tidy.LoadManifest()

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
 
@@ -74,8 +74,8 @@ func (p fakeProber) Warmup(context.Context, string, string) (bool, error) {
 	return p.warmup, nil
 }
 
-func desired(name, hash, key string) instance.Desired {
-	return instance.Desired{
+func desired(name, hash, key string) serveinstance.Desired {
+	return serveinstance.Desired{
 		Name:        name,
 		ServedName:  name,
 		ModelID:     "org/" + name,
@@ -88,7 +88,7 @@ func desired(name, hash, key string) instance.Desired {
 
 // servingState builds a RuntimeState whose containers carry the desired identity
 // and the required services, so Reconcile (with a healthy prober) yields serving.
-func servingState(d instance.Desired) runtime.RuntimeState {
+func servingState(d serveinstance.Desired) runtime.RuntimeState {
 	want := IdentityLabels(d)
 	mk := func(svc string) runtime.ServiceState {
 		l := maps.Clone(want)
@@ -101,7 +101,7 @@ func servingState(d instance.Desired) runtime.RuntimeState {
 func newOrch(t *testing.T, rt runtime.Runtime, pr runtime.Prober) *Orchestrator {
 	t.Helper()
 	return &Orchestrator{
-		Store:        instance.NewStore(t.TempDir()),
+		Store:        serveinstance.NewStore(t.TempDir()),
 		Runtime:      rt,
 		Prober:       pr,
 		SpecDir:      t.TempDir(),
@@ -142,7 +142,7 @@ func TestUp_FailsToServe_ConfirmedCleanup(t *testing.T) {
 	if err == nil {
 		t.Fatal("a never-serving bring-up must fail")
 	}
-	if _, err := o.Store.Load("qwen"); err != instance.ErrNotFound {
+	if _, err := o.Store.Load("qwen"); err != serveinstance.ErrNotFound {
 		t.Error("confirmed cleanup must remove the manifest (no orphan record)")
 	}
 	if rt.downs == 0 {
@@ -165,7 +165,7 @@ func TestUp_FailsToServe_UnconfirmedCleanup_KeepsHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal("unconfirmed cleanup must KEEP the manifest as a recovery handle")
 	}
-	if in.Operation == nil || in.Operation.Phase != instance.PhaseCleanupRequired {
+	if in.Operation == nil || in.Operation.Phase != serveinstance.PhaseCleanupRequired {
 		t.Errorf("expected cleanup_required, got %+v", in.Operation)
 	}
 }
@@ -325,7 +325,7 @@ func TestDown_Confirmed_RemovesManifest(t *testing.T) {
 	if err := o.Down(context.Background(), "qwen"); err != nil {
 		t.Fatalf("down: %v", err)
 	}
-	if _, err := o.Store.Load("qwen"); err != instance.ErrNotFound {
+	if _, err := o.Store.Load("qwen"); err != serveinstance.ErrNotFound {
 		t.Error("confirmed down must remove the manifest")
 	}
 }
@@ -343,7 +343,7 @@ func TestDown_Unconfirmed_KeepsCleanupRequired(t *testing.T) {
 		t.Fatal("unconfirmed down must report an error")
 	}
 	in, err := o.Store.Load("qwen")
-	if err != nil || in.Operation == nil || in.Operation.Phase != instance.PhaseCleanupRequired {
+	if err != nil || in.Operation == nil || in.Operation.Phase != serveinstance.PhaseCleanupRequired {
 		t.Errorf("unconfirmed down must keep a cleanup_required handle, got %+v err=%v", in, err)
 	}
 }
@@ -356,13 +356,13 @@ func TestForget_NeverStarted_ConfirmsWithoutAcceptOrphan(t *testing.T) {
 	rt.downErr = context.DeadlineExceeded // even if Down errors on a broken spec
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	if err := o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseCleanupRequired}}); err != nil {
+	if err := o.Store.Save(serveinstance.Instance{Desired: d, Operation: &serveinstance.Operation{Phase: serveinstance.PhaseCleanupRequired}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Forget(context.Background(), "qwen", false); err != nil {
 		t.Errorf("a never-started cleanup_required must forget without --accept-orphan, got %v", err)
 	}
-	if _, err := o.Store.Load("qwen"); err != instance.ErrNotFound {
+	if _, err := o.Store.Load("qwen"); err != serveinstance.ErrNotFound {
 		t.Error("manifest should be cleared")
 	}
 }
@@ -384,7 +384,7 @@ func TestStatus_Conflict_OnLabelMismatch(t *testing.T) {
 	}}
 	rt.serveFor[o.specPath(d)] = foreign
 	rt.active = o.specPath(d)
-	if err := o.Store.Save(instance.Instance{Desired: d}); err != nil {
+	if err := o.Store.Save(serveinstance.Instance{Desired: d}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := o.Status(context.Background(), "qwen")
@@ -401,7 +401,7 @@ func TestStatus_DriftNotStopped(t *testing.T) {
 	rt := newFakeRuntime() // nothing active
 	o := newOrch(t, rt, fakeProber{health: true, warmup: true})
 	d := desired("qwen", "hashA", "base")
-	if err := o.Store.Save(instance.Instance{Desired: d}); err != nil {
+	if err := o.Store.Save(serveinstance.Instance{Desired: d}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := o.Status(context.Background(), "qwen")
@@ -448,7 +448,7 @@ func TestForget_RefusesWhenStackMayLive(t *testing.T) {
 	d := desired("qwen", "hashA", "base")
 	rt.serveFor[o.specPath(d)] = servingState(d)
 	rt.active = o.specPath(d)
-	_ = o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseCleanupRequired}})
+	_ = o.Store.Save(serveinstance.Instance{Desired: d, Operation: &serveinstance.Operation{Phase: serveinstance.PhaseCleanupRequired}})
 
 	if err := o.Forget(context.Background(), "qwen", false); err == nil {
 		t.Error("forget without accept-orphan must refuse when absence can't be confirmed")
@@ -459,7 +459,7 @@ func TestForget_RefusesWhenStackMayLive(t *testing.T) {
 	if err := o.Forget(context.Background(), "qwen", true); err != nil {
 		t.Errorf("forget --accept-orphan must abandon, got %v", err)
 	}
-	if _, err := o.Store.Load("qwen"); err != instance.ErrNotFound {
+	if _, err := o.Store.Load("qwen"); err != serveinstance.ErrNotFound {
 		t.Error("accepted forget must remove the manifest")
 	}
 }

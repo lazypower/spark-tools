@@ -11,11 +11,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/serveartifact"
+	"github.com/lazypower/spark-tools/internal/servecontract"
+	"github.com/lazypower/spark-tools/internal/servespec"
 	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
-	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
-	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
-	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
 )
 
 func emitCmd() *cobra.Command {
@@ -37,7 +37,7 @@ func emitCmd() *cobra.Command {
 		Use:   "emit",
 		Short: "Resolve a serve request and emit a validated vLLM launch spec",
 		Long: "Resolve {model dir + capabilities + hardware} into a validated vLLM launch spec.\n\n" +
-			"The model directory must be an hfetch-verified artifact. Pass --repo-tree (a saved\n" +
+			"The model directory must be an hfetch-verified serveartifact. Pass --repo-tree (a saved\n" +
 			"hfetch tree listing) to re-run the completeness gate before emitting; otherwise the\n" +
 			"artifact is trusted to have been gated at pull time.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -59,14 +59,14 @@ func emitCmd() *cobra.Command {
 				return err
 			}
 
-			req := contract.Request{
+			req := servecontract.Request{
 				ServedName:   name,
 				Capabilities: capList,
 				ContextLen:   ctx,
 				Dtype:        dtype,
 				Target:       llmserve.Fingerprint{Engine: image, Accelerator: accelerator},
 			}
-			host := emit.Host{Image: imageRef(image), Port: port, Volumes: mountList}
+			host := servespec.Host{Image: imageRef(image), Port: port, Volumes: mountList}
 
 			res, err := llmserve.Emit(req, facts, tgt, host)
 			if err != nil {
@@ -101,7 +101,7 @@ func emitCmd() *cobra.Command {
 }
 
 // resolveFacts produces verified artifact facts. With a repo tree it runs the
-// hfetch completeness gate (artifact.Verify); without one it detects facts and
+// hfetch completeness gate (serveartifact.Verify); without one it detects facts and
 // warns that the artifact was not re-verified.
 func resolveFacts(modelDir, repoTree string, stderr interface{ Write([]byte) (int, error) }) (serving.ArtifactFacts, error) {
 	if repoTree != "" {
@@ -109,10 +109,10 @@ func resolveFacts(modelDir, repoTree string, stderr interface{ Write([]byte) (in
 		if err != nil {
 			return serving.ArtifactFacts{}, err
 		}
-		return artifact.Verify(files, modelDir)
+		return serveartifact.Verify(files, modelDir)
 	}
 	fmt.Fprintf(stderr, "warning: emitting without --repo-tree; trusting that %q was completeness-gated at hfetch pull time\n", modelDir)
-	return artifact.DetectFacts(modelDir)
+	return serveartifact.DetectFacts(modelDir)
 }
 
 func loadRepoTree(path string) ([]hub.ModelFile, error) {
@@ -149,8 +149,8 @@ func parseCaps(caps []string) ([]serving.Capability, error) {
 	return out, nil
 }
 
-func parseMounts(mounts []string) ([]emit.Mount, error) {
-	var out []emit.Mount
+func parseMounts(mounts []string) ([]servespec.Mount, error) {
+	var out []servespec.Mount
 	for _, m := range mounts {
 		host, container, ok := strings.Cut(m, ":")
 		if !ok || host == "" || container == "" {
@@ -164,14 +164,14 @@ func parseMounts(mounts []string) ([]emit.Mount, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolving --mount host %q: %w", host, err)
 		}
-		out = append(out, emit.Mount{Host: absHost, Container: container})
+		out = append(out, servespec.Mount{Host: absHost, Container: container})
 	}
 	return out, nil
 }
 
-func parseTarget(target string) (emit.Target, error) {
-	t := emit.Target(target)
-	if slices.Contains(emit.Targets(), t) {
+func parseTarget(target string) (servespec.Target, error) {
+	t := servespec.Target(target)
+	if slices.Contains(servespec.Targets(), t) {
 		return t, nil
 	}
 	return "", fmt.Errorf("unknown target %q (have: compose, docker-run, quadlet)", target)

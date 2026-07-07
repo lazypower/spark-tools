@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 )
@@ -232,7 +232,7 @@ func TestStatusCmd_NoInstances(t *testing.T) {
 func TestPrintStatus(t *testing.T) {
 	var buf bytes.Buffer
 	printStatus(&buf, lifecycle.InstanceStatus{
-		Instance:   instance.Instance{Desired: instance.Desired{Name: "qwen-coder"}},
+		Instance:   serveinstance.Instance{Desired: serveinstance.Desired{Name: "qwen-coder"}},
 		Reconciled: lifecycle.Reconciled{Status: lifecycle.StatusServing, Reason: "health ok"},
 	})
 	out := buf.String()

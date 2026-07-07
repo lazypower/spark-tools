@@ -11,7 +11,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 )
 
 // Identity label keys. Every distinguishing field of the desired record is
@@ -46,7 +46,7 @@ const (
 // IdentityLabels is the canonical label set for a desired instance — the SINGLE
 // definition used both to stamp the emitted stack (emit) and to verify it
 // (reconcile), so the two can never drift.
-func IdentityLabels(d instance.Desired) map[string]string {
+func IdentityLabels(d serveinstance.Desired) map[string]string {
 	return map[string]string{
 		LabelManagedBy:        ManagedByValue,
 		LabelInstance:         d.Name,
@@ -61,8 +61,8 @@ func IdentityLabels(d instance.Desired) map[string]string {
 }
 
 // matchesIdentity reports whether a container's labels carry the full identity of
-// the desired instance. Every identity key must be present and equal; a single
-// mismatch means the running container is NOT this instance.
+// the desired serveinstance. Every identity key must be present and equal; a single
+// mismatch means the running container is NOT this serveinstance.
 func matchesIdentity(containerLabels, want map[string]string) bool {
 	for k, v := range want {
 		if containerLabels[k] != v {
@@ -76,7 +76,7 @@ func matchesIdentity(containerLabels, want map[string]string) bool {
 // configuration across the FULL identity (not just the contract key — which omits
 // model id/revision/served name/target). A re-up of the same identity is an
 // idempotent no-op; any identity difference is a change that triggers a replace.
-func SameIdentity(a, b instance.Desired) bool {
+func SameIdentity(a, b serveinstance.Desired) bool {
 	return maps.Equal(IdentityLabels(a), IdentityLabels(b))
 }
 
@@ -84,7 +84,7 @@ func SameIdentity(a, b instance.Desired) bool {
 // managed spec file so two DIFFERENT identities that happen to render the same
 // command (same SpecHash) never share a spec path — which would let a replace's
 // candidate overwrite the current spec and lose it for restore.
-func IdentityTag(d instance.Desired) string {
+func IdentityTag(d serveinstance.Desired) string {
 	labels := IdentityLabels(d)
 	keys := make([]string, 0, len(labels))
 	for k := range labels {

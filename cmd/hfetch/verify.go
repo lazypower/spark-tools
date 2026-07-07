@@ -12,8 +12,8 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/fileset"
 	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 func verifyCmd() *cobra.Command {
@@ -37,7 +37,7 @@ func verifyCmd() *cobra.Command {
 
 			client := newAPIClient(cmd)
 			dirs := config.Dirs()
-			reg := registry.New(dirs.Data)
+			reg := modelstore.New(dirs.Data)
 			if err := reg.Load(); err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ func verifyCmd() *cobra.Command {
 // in the registry — goes through the completeness gate. It prints a per-model
 // result and returns an error iff the model is not serve-ready, so the caller
 // can tally failures across an --all sweep.
-func verifyOne(ctx context.Context, client *hub.Client, reg *registry.Registry, modelID, output string) error {
+func verifyOne(ctx context.Context, client *hub.Client, reg *modelstore.Registry, modelID, output string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	fmt.Printf("\n  %s %s\n", headerStyle.Render("Verifying"), modelID)
 
@@ -163,7 +163,7 @@ func verifyOne(ctx context.Context, client *hub.Client, reg *registry.Registry, 
 // neither is available it falls back to the registry's model dir — never to a
 // bare (cwd-relative) filename, which could verify an unrelated file in the
 // working directory and pass without proving the registered download exists.
-func ggufLocalPath(f registry.LocalFile, output, modelDir string) string {
+func ggufLocalPath(f modelstore.LocalFile, output, modelDir string) string {
 	if output != "" {
 		return filepath.Join(output, filepath.Base(f.Filename))
 	}

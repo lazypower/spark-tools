@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
 
@@ -48,7 +48,7 @@ var requiredServices = []string{"vllm", "watchdog"}
 // (else not-serving; missing watchdog ⇒ fail closed) → /health 200 → warmup
 // against the exact served name. Any failure short-circuits to a fail-closed
 // status; only the full predicate yields serving.
-func Reconcile(ctx context.Context, rt runtime.Runtime, pr runtime.Prober, d instance.Desired, endpoint string) Reconciled {
+func Reconcile(ctx context.Context, rt runtime.Runtime, pr runtime.Prober, d serveinstance.Desired, endpoint string) Reconciled {
 	state, err := rt.Inspect(ctx, d.ProjectName, d.SpecPath)
 	if err != nil {
 		return Reconciled{StatusUnknown, "runtime unreachable: " + err.Error()}

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
 
@@ -17,7 +17,7 @@ import (
 // (already carrying the identity labels). The caller does resolve+emit; the
 // orchestrator owns the transactional apply.
 type Plan struct {
-	Desired instance.Desired
+	Desired serveinstance.Desired
 	Spec    string
 }
 
@@ -33,7 +33,7 @@ type Result struct {
 // reconciling against the runtime. Mutations and recovery hold the store's host
 // lock; reads (Status/List) are pure.
 type Orchestrator struct {
-	Store        *instance.Store
+	Store        *serveinstance.Store
 	Runtime      runtime.Runtime
 	Prober       runtime.Prober
 	SpecDir      string        // where managed specs are written
@@ -65,7 +65,7 @@ func (o *Orchestrator) pollInterval() time.Duration {
 // unsafe: two distinct identities (e.g. differing only by target accelerator or
 // model revision) can render the same command and would collide, letting the
 // candidate clobber current and lose it for restore.
-func (o *Orchestrator) specPath(d instance.Desired) string {
+func (o *Orchestrator) specPath(d serveinstance.Desired) string {
 	return filepath.Join(o.SpecDir, d.Name+"-"+IdentityTag(d)+".compose.yml")
 }
 
@@ -84,7 +84,7 @@ func (o *Orchestrator) writeSpec(path, content string) error {
 // named destructive replace. It holds the host lock and runs in-flight recovery
 // first.
 func (o *Orchestrator) Up(ctx context.Context, plan Plan) (Result, error) {
-	if !instance.ValidName(plan.Desired.Name) {
+	if !serveinstance.ValidName(plan.Desired.Name) {
 		return Result{}, fmt.Errorf("invalid instance name %q", plan.Desired.Name)
 	}
 	unlock, err := o.Store.Lock()
@@ -98,7 +98,7 @@ func (o *Orchestrator) Up(ctx context.Context, plan Plan) (Result, error) {
 	name := plan.Desired.Name
 	existing, err := o.Store.Load(name)
 	switch {
-	case errors.Is(err, instance.ErrNotFound):
+	case errors.Is(err, serveinstance.ErrNotFound):
 		return o.bringUp(ctx, plan)
 	case err != nil:
 		return Result{}, err
@@ -127,7 +127,7 @@ func (o *Orchestrator) bringUp(ctx context.Context, plan Plan) (Result, error) {
 		return Result{}, err
 	}
 	// Crash-safe ordering: spec exists, THEN manifest, THEN runtime resources.
-	if err := o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseStarting}}); err != nil {
+	if err := o.Store.Save(serveinstance.Instance{Desired: d, Operation: &serveinstance.Operation{Phase: serveinstance.PhaseStarting}}); err != nil {
 		return Result{}, err
 	}
 	if err := o.Runtime.Up(ctx, d.ProjectName, d.SpecPath); err != nil {
@@ -136,7 +136,7 @@ func (o *Orchestrator) bringUp(ctx context.Context, plan Plan) (Result, error) {
 	if rec := o.waitServing(ctx, d); !rec.serving() {
 		return o.failCleanup(ctx, d, "did not reach serving: "+rec.Reason)
 	}
-	if err := o.Store.Save(instance.Instance{Desired: d}); err != nil { // clear operation
+	if err := o.Store.Save(serveinstance.Instance{Desired: d}); err != nil { // clear operation
 		return Result{}, err
 	}
 	return Result{StatusServing, "serving", false}, nil
@@ -146,17 +146,17 @@ func (o *Orchestrator) bringUp(ctx context.Context, plan Plan) (Result, error) {
 // overlap). The candidate is validated offline already (the Plan exists); current
 // is torn down, candidate brought up; on success candidate is promoted, on
 // failure current is best-effort restored and never falsely reported serving.
-func (o *Orchestrator) replace(ctx context.Context, current instance.Desired, plan Plan) (Result, error) {
+func (o *Orchestrator) replace(ctx context.Context, current serveinstance.Desired, plan Plan) (Result, error) {
 	cand := plan.Desired
 	cand.SpecPath = o.specPath(cand)
 	if err := o.writeSpec(cand.SpecPath, plan.Spec); err != nil {
 		return Result{}, err
 	}
 	// Record current + candidate before mutating, so a crash mid-replace is recoverable.
-	if err := o.Store.Save(instance.Instance{
+	if err := o.Store.Save(serveinstance.Instance{
 		Desired:   current,
 		Candidate: &cand,
-		Operation: &instance.Operation{Phase: instance.PhaseReplacing},
+		Operation: &serveinstance.Operation{Phase: serveinstance.PhaseReplacing},
 	}); err != nil {
 		return Result{}, err
 	}
@@ -164,7 +164,7 @@ func (o *Orchestrator) replace(ctx context.Context, current instance.Desired, pl
 	_ = o.Runtime.Down(ctx, current.ProjectName, current.SpecPath) // free the port
 	if err := o.Runtime.Up(ctx, cand.ProjectName, cand.SpecPath); err == nil {
 		if rec := o.waitServing(ctx, cand); rec.serving() {
-			if err := o.Store.Save(instance.Instance{Desired: cand}); err != nil { // promote
+			if err := o.Store.Save(serveinstance.Instance{Desired: cand}); err != nil { // promote
 				return Result{}, err
 			}
 			o.gcSpec(current, cand)
@@ -179,10 +179,10 @@ func (o *Orchestrator) replace(ctx context.Context, current instance.Desired, pl
 // restoreCurrent attempts to bring the prior instance back after a failed replace.
 // It NEVER clears to a normal desired=current state unless current's OWN serving
 // predicate is re-confirmed; otherwise it leaves a cleanup_required recovery handle.
-func (o *Orchestrator) restoreCurrent(ctx context.Context, current instance.Desired) (Result, error) {
+func (o *Orchestrator) restoreCurrent(ctx context.Context, current serveinstance.Desired) (Result, error) {
 	if err := o.Runtime.Up(ctx, current.ProjectName, current.SpecPath); err == nil {
 		if rec := o.waitServing(ctx, current); rec.serving() {
-			if err := o.Store.Save(instance.Instance{Desired: current}); err != nil {
+			if err := o.Store.Save(serveinstance.Instance{Desired: current}); err != nil {
 				return Result{}, err
 			}
 			return Result{StatusServing, "replace failed; restored prior instance", false},
@@ -197,7 +197,7 @@ func (o *Orchestrator) restoreCurrent(ctx context.Context, current instance.Desi
 // failCleanup tears down a failed bring-up. It removes the manifest ONLY on
 // CONFIRMED runtime absence; if teardown can't be confirmed it keeps a
 // cleanup_required recovery handle (never erases the only handle to an orphan).
-func (o *Orchestrator) failCleanup(ctx context.Context, d instance.Desired, reason string) (Result, error) {
+func (o *Orchestrator) failCleanup(ctx context.Context, d serveinstance.Desired, reason string) (Result, error) {
 	if o.confirmedDown(ctx, d) {
 		_ = o.Store.Delete(d.Name)
 		return Result{StatusNotServing, reason + " (cleaned up)", false}, errors.New(reason)
@@ -207,13 +207,13 @@ func (o *Orchestrator) failCleanup(ctx context.Context, d instance.Desired, reas
 		fmt.Errorf("%s (cleanup_required)", reason)
 }
 
-// confirmedDown ensures no stack remains for an instance. Absence is proven by
+// confirmedDown ensures no stack remains for an serveinstance. Absence is proven by
 // Inspect (which queries the runtime by label, independent of the spec file), so
 // if nothing is running we confirm immediately — even when the spec is
 // unparseable and `compose down` would fail (the never-started / broken-spec
 // case). Only when a stack IS present do we require a clean teardown AND a
 // follow-up Inspect showing it gone. Any Inspect error ⇒ unconfirmed (fail closed).
-func (o *Orchestrator) confirmedDown(ctx context.Context, d instance.Desired) bool {
+func (o *Orchestrator) confirmedDown(ctx context.Context, d serveinstance.Desired) bool {
 	if state, err := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath); err == nil && !state.Exists {
 		return true // nothing to tear down — absence already proven by the runtime
 	}
@@ -222,13 +222,13 @@ func (o *Orchestrator) confirmedDown(ctx context.Context, d instance.Desired) bo
 	return downErr == nil && inspErr == nil && !state.Exists
 }
 
-func (o *Orchestrator) markCleanupRequired(d instance.Desired) {
-	_ = o.Store.Save(instance.Instance{Desired: d, Operation: &instance.Operation{Phase: instance.PhaseCleanupRequired}})
+func (o *Orchestrator) markCleanupRequired(d serveinstance.Desired) {
+	_ = o.Store.Save(serveinstance.Instance{Desired: d, Operation: &serveinstance.Operation{Phase: serveinstance.PhaseCleanupRequired}})
 }
 
 // gcSpec removes the superseded current spec file after a successful promote
 // (best-effort; a leftover spec is harmless).
-func (o *Orchestrator) gcSpec(old, current instance.Desired) {
+func (o *Orchestrator) gcSpec(old, current serveinstance.Desired) {
 	if old.SpecPath != "" && old.SpecPath != current.SpecPath {
 		_ = os.Remove(old.SpecPath)
 	}
@@ -241,7 +241,7 @@ func (o *Orchestrator) gcSpec(old, current instance.Desired) {
 // so we only give up early when the engine container has EXITED (a real crash,
 // not a slow load) or the request is cancelled. The generous ceiling is the
 // backstop for a container that is running but wedged during load.
-func (o *Orchestrator) waitServing(ctx context.Context, d instance.Desired) Reconciled {
+func (o *Orchestrator) waitServing(ctx context.Context, d serveinstance.Desired) Reconciled {
 	deadline := time.Now().Add(o.bootTimeout())
 	for {
 		rec := Reconcile(ctx, o.Runtime, o.Prober, d, d.Endpoint)
@@ -281,7 +281,7 @@ const crashLoopRestarts = 3
 // a terminally not-running container. Absent/unknown is NOT a crash (a created
 // container appears momentarily; let the ceiling handle a vanished stack rather
 // than fail on an inspect race).
-func (o *Orchestrator) engineCrashed(ctx context.Context, d instance.Desired) (bool, string) {
+func (o *Orchestrator) engineCrashed(ctx context.Context, d serveinstance.Desired) (bool, string) {
 	state, err := o.Runtime.Inspect(ctx, d.ProjectName, d.SpecPath)
 	if err != nil || !state.Exists {
 		return false, ""
@@ -309,13 +309,13 @@ func (o *Orchestrator) Down(ctx context.Context, name string) error {
 	defer unlock()
 
 	in, err := o.Store.Load(name)
-	if errors.Is(err, instance.ErrNotFound) {
+	if errors.Is(err, serveinstance.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	_ = o.Store.Save(instance.Instance{Desired: in.Desired, Operation: &instance.Operation{Phase: instance.PhaseStopping}})
+	_ = o.Store.Save(serveinstance.Instance{Desired: in.Desired, Operation: &serveinstance.Operation{Phase: serveinstance.PhaseStopping}})
 	if o.confirmedDown(ctx, in.Desired) {
 		return o.Store.Delete(name)
 	}
@@ -334,7 +334,7 @@ func (o *Orchestrator) Forget(ctx context.Context, name string, acceptOrphan boo
 	defer unlock()
 
 	in, err := o.Store.Load(name)
-	if errors.Is(err, instance.ErrNotFound) {
+	if errors.Is(err, serveinstance.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -375,19 +375,19 @@ func (o *Orchestrator) recoverLocked(ctx context.Context) {
 			continue
 		}
 		switch in.Operation.Phase {
-		case instance.PhaseStarting:
+		case serveinstance.PhaseStarting:
 			if Reconcile(ctx, o.Runtime, o.Prober, in.Desired, in.Desired.Endpoint).serving() {
-				_ = o.Store.Save(instance.Instance{Desired: in.Desired}) // adopt
+				_ = o.Store.Save(serveinstance.Instance{Desired: in.Desired}) // adopt
 			} else {
 				o.failCleanupSilent(ctx, in.Desired)
 			}
-		case instance.PhaseReplacing:
+		case serveinstance.PhaseReplacing:
 			if in.Candidate != nil && Reconcile(ctx, o.Runtime, o.Prober, *in.Candidate, in.Candidate.Endpoint).serving() {
-				_ = o.Store.Save(instance.Instance{Desired: *in.Candidate}) // promote
+				_ = o.Store.Save(serveinstance.Instance{Desired: *in.Candidate}) // promote
 			} else {
 				_, _ = o.restoreCurrent(ctx, in.Desired)
 			}
-		case instance.PhaseStopping, instance.PhaseCleanupRequired:
+		case serveinstance.PhaseStopping, serveinstance.PhaseCleanupRequired:
 			if o.confirmedDown(ctx, in.Desired) {
 				_ = o.Store.Delete(in.Desired.Name)
 			} else {
@@ -397,7 +397,7 @@ func (o *Orchestrator) recoverLocked(ctx context.Context) {
 	}
 }
 
-func (o *Orchestrator) failCleanupSilent(ctx context.Context, d instance.Desired) {
+func (o *Orchestrator) failCleanupSilent(ctx context.Context, d serveinstance.Desired) {
 	if o.confirmedDown(ctx, d) {
 		_ = o.Store.Delete(d.Name)
 		return
@@ -407,7 +407,7 @@ func (o *Orchestrator) failCleanupSilent(ctx context.Context, d instance.Desired
 
 // InstanceStatus pairs a manifest with its reconciled runtime status.
 type InstanceStatus struct {
-	Instance instance.Instance
+	Instance serveinstance.Instance
 	Reconciled
 }
 

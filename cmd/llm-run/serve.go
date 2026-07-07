@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/modelref"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 	"github.com/lazypower/spark-tools/internal/tui"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 	"github.com/lazypower/spark-tools/pkg/llmrun/profiles"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
 )
 
 func serveCmd() *cobra.Command {
@@ -45,8 +45,8 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 
-			dirs := config.Dirs()
-			gcfg := config.LoadGlobalConfig()
+			dirs := runconfig.Dirs()
+			gcfg := runconfig.LoadGlobalConfig()
 
 			var cfg engine.RunConfig
 			if profileName != "" {
@@ -66,7 +66,7 @@ func serveCmd() *cobra.Command {
 
 			// Resolve model.
 			hfDirs := hfconfig.Dirs()
-			res := resolver.NewResolver(dirs.Config, hfDirs.Data)
+			res := modelref.NewResolver(dirs.Config, hfDirs.Data)
 			resolved, err := res.ResolveModel(context.Background(), modelRef)
 			if err != nil {
 				return err

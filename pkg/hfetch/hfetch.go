@@ -19,9 +19,9 @@ import (
 	// hub import would not conflict, but keeping the qualifier avoids churning
 	// every c.api.* field access.
 	api "github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/hubsource"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/hfetch/source"
 )
 
 // Re-export key types from sub-packages for convenience.
@@ -29,8 +29,8 @@ type (
 	Model        = api.Model
 	ModelFile    = api.ModelFile
 	GGUFMetadata = gguf.GGUFMetadata
-	LocalModel   = registry.LocalModel
-	LocalFile    = registry.LocalFile
+	LocalModel   = modelstore.LocalModel
+	LocalFile    = modelstore.LocalFile
 	FileInfo     = gguf.FileInfo
 	FitResult    = gguf.FitResult
 )
@@ -55,7 +55,7 @@ type ProgressFunc = download.ProgressFunc
 // Client is the main entry point for the hfetch library.
 type Client struct {
 	api      *api.Client
-	registry *registry.Registry
+	registry *modelstore.Registry
 	dirs     config.DirConfig
 }
 
@@ -116,7 +116,7 @@ func NewClient(opts ...Option) (*Client, error) {
 
 	apiOpts = append(apiOpts, api.WithCacheDir(dirs.Cache))
 
-	reg := registry.New(dirs.Data)
+	reg := modelstore.New(dirs.Data)
 	if err := reg.Load(); err != nil {
 		return nil, fmt.Errorf("loading registry: %w", err)
 	}
@@ -154,7 +154,7 @@ func (c *Client) FetchGGUFMetadata(ctx context.Context, modelID, filename string
 	return gguf.Parse(bytes.NewReader(data))
 }
 
-// Pull downloads a model file and registers it in the local registry.
+// Pull downloads a model file and registers it in the local modelstore.
 func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOptions) (*LocalFile, error) {
 	outputDir := opts.OutputDir
 	if outputDir == "" {
@@ -172,7 +172,7 @@ func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOp
 		return nil, fmt.Errorf("file %q not found in %s", filename, modelID)
 	}
 
-	src := source.New(c.api, modelID, filename, size, sha256)
+	src := hubsource.New(c.api, modelID, filename, size, sha256)
 
 	streams := opts.Streams
 	if streams <= 0 {
@@ -191,7 +191,7 @@ func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOp
 
 	quant := gguf.ParseQuantFromFilename(filename)
 
-	lf := registry.LocalFile{
+	lf := modelstore.LocalFile{
 		Filename:     filename,
 		Size:         size,
 		Quantization: quant,
@@ -208,7 +208,7 @@ func (c *Client) Pull(ctx context.Context, modelID, filename string, opts PullOp
 }
 
 // Registry returns access to locally downloaded models.
-func (c *Client) Registry() *registry.Registry {
+func (c *Client) Registry() *modelstore.Registry {
 	return c.registry
 }
 

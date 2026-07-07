@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmrun/api"
+	"github.com/lazypower/spark-tools/internal/openaiapi"
 )
 
 // handleSlashCommand mutates the model and returns a tea.Cmd; none of these
@@ -14,15 +14,15 @@ import (
 // behavior hermetically. (The bubbletea Run loop and streaming are deferred —
 // see docs/internal-seam-test-audit.md.)
 
-func newModel(msgs ...api.Message) *chatModel {
+func newModel(msgs ...openaiapi.Message) *chatModel {
 	return &chatModel{cfg: ChatConfig{ContextSize: 4096}, messages: msgs}
 }
 
 func TestSlash_ClearKeepsSystem(t *testing.T) {
 	m := newModel(
-		api.Message{Role: "system", Content: "you are helpful"},
-		api.Message{Role: "user", Content: "hi"},
-		api.Message{Role: "assistant", Content: "hello"},
+		openaiapi.Message{Role: "system", Content: "you are helpful"},
+		openaiapi.Message{Role: "user", Content: "hi"},
+		openaiapi.Message{Role: "assistant", Content: "hello"},
 	)
 	m.promptTokens, m.genTokens = 10, 20
 	m.handleSlashCommand("/clear")
@@ -36,8 +36,8 @@ func TestSlash_ClearKeepsSystem(t *testing.T) {
 
 func TestSlash_SystemReplacesAndPrepends(t *testing.T) {
 	m := newModel(
-		api.Message{Role: "system", Content: "old"},
-		api.Message{Role: "user", Content: "hi"},
+		openaiapi.Message{Role: "system", Content: "old"},
+		openaiapi.Message{Role: "user", Content: "hi"},
 	)
 	m.handleSlashCommand("/system you are a pirate")
 	if m.messages[0].Role != "system" || m.messages[0].Content != "you are a pirate" {
@@ -117,8 +117,8 @@ func TestSlash_ContextReportsUsage(t *testing.T) {
 // to the model on every turn (a /stats box carried ANSI escapes into the chat).
 func TestSlash_FeedbackDoesNotPolluteConversation(t *testing.T) {
 	m := newModel(
-		api.Message{Role: "system", Content: "sys"},
-		api.Message{Role: "user", Content: "hi"},
+		openaiapi.Message{Role: "system", Content: "sys"},
+		openaiapi.Message{Role: "user", Content: "hi"},
 	)
 	before := len(m.messages)
 	for _, c := range []string{"/stats", "/context", "/temp 0.5"} {
@@ -135,7 +135,7 @@ func TestSlash_FeedbackDoesNotPolluteConversation(t *testing.T) {
 
 // The /save success confirmation is UI feedback, not a conversation turn.
 func TestSaveResult_SetsNoticeNotMessage(t *testing.T) {
-	m := newModel(api.Message{Role: "user", Content: "hi"})
+	m := newModel(openaiapi.Message{Role: "user", Content: "hi"})
 	before := len(m.messages)
 	m.Update(saveResultMsg{path: "/tmp/convo.txt"})
 	if len(m.messages) != before {
@@ -159,8 +159,8 @@ func TestSlash_SaveUsageErrorAndWrite(t *testing.T) {
 	// With a path → the returned cmd writes role-tagged content.
 	path := filepath.Join(t.TempDir(), "convo.txt")
 	m2 := newModel(
-		api.Message{Role: "user", Content: "ping"},
-		api.Message{Role: "assistant", Content: "pong"},
+		openaiapi.Message{Role: "user", Content: "ping"},
+		openaiapi.Message{Role: "assistant", Content: "pong"},
 	)
 	_, cmd := m2.handleSlashCommand("/save " + path)
 	if cmd == nil {

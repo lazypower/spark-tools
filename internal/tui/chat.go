@@ -13,12 +13,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/lazypower/spark-tools/pkg/llmrun/api"
+	"github.com/lazypower/spark-tools/internal/openaiapi"
 )
 
 // ChatConfig configures the chat TUI.
 type ChatConfig struct {
-	Client      *api.Client
+	Client      *openaiapi.Client
 	ModelName   string
 	Quant       string
 	ContextSize int
@@ -30,11 +30,11 @@ type ChatConfig struct {
 // chatModel is the bubbletea model for interactive chat.
 type chatModel struct {
 	cfg    ChatConfig
-	client *api.Client
+	client *openaiapi.Client
 	prog   *tea.Program // set after NewProgram, used to send streaming tokens
 
 	// Conversation
-	messages []api.Message
+	messages []openaiapi.Message
 	input    string
 	history  []string // command history
 
@@ -69,7 +69,7 @@ type tokenMsg struct {
 
 // streamDoneMsg signals the stream completed with usage and finish reason.
 type streamDoneMsg struct {
-	usage        api.Usage
+	usage        openaiapi.Usage
 	finishReason string
 }
 
@@ -78,7 +78,7 @@ type streamErrMsg struct{ err error }
 
 // RunChat launches the interactive chat TUI. Optional initial messages
 // (e.g. a system prompt) are prepended to the conversation.
-func RunChat(cfg ChatConfig, initial ...api.Message) error {
+func RunChat(cfg ChatConfig, initial ...openaiapi.Message) error {
 	m := &chatModel{
 		cfg:      cfg,
 		client:   cfg.Client,
@@ -143,7 +143,7 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		content := m.streamBuf.String()
 		if content != "" {
-			m.messages = append(m.messages, api.Message{
+			m.messages = append(m.messages, openaiapi.Message{
 				Role:    "assistant",
 				Content: content,
 			})
@@ -288,7 +288,7 @@ func (m *chatModel) handleSubmit() (tea.Model, tea.Cmd) {
 	}
 
 	// Add user message.
-	m.messages = append(m.messages, api.Message{
+	m.messages = append(m.messages, openaiapi.Message{
 		Role:    "user",
 		Content: input,
 	})
@@ -312,7 +312,7 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 
 	case "/clear":
 		// Keep system messages, clear the rest.
-		var kept []api.Message
+		var kept []openaiapi.Message
 		for _, msg := range m.messages {
 			if msg.Role == "system" {
 				kept = append(kept, msg)
@@ -348,13 +348,13 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Remove existing system messages and add new one.
-		var kept []api.Message
+		var kept []openaiapi.Message
 		for _, msg := range m.messages {
 			if msg.Role != "system" {
 				kept = append(kept, msg)
 			}
 		}
-		m.messages = append([]api.Message{{Role: "system", Content: text}}, kept...)
+		m.messages = append([]openaiapi.Message{{Role: "system", Content: text}}, kept...)
 		return m, nil
 
 	case "/temp":
@@ -456,7 +456,7 @@ func checkBoundary(accumulated string) (clean string, hit bool) {
 
 func (m *chatModel) streamResponse() tea.Cmd {
 	return func() tea.Msg {
-		req := api.ChatCompletionRequest{
+		req := openaiapi.ChatCompletionRequest{
 			Model:       m.cfg.ModelName,
 			Messages:    m.messages,
 			Stop:        chatStopSequences,
@@ -471,7 +471,7 @@ func (m *chatModel) streamResponse() tea.Cmd {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		usage, err := m.client.ChatCompletionStream(ctx, req, func(delta api.StreamDelta) {
+		usage, err := m.client.ChatCompletionStream(ctx, req, func(delta openaiapi.StreamDelta) {
 			if boundaryHit {
 				return // discard everything after boundary
 			}

@@ -10,8 +10,8 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/modelmeta"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/quant"
 )
 
 func infoCmd() *cobra.Command {
@@ -88,7 +88,7 @@ func infoCmd() *cobra.Command {
 // fetchQuantInfo reads a model's quantization format from its config files
 // without downloading the weights. Returns nil when the model is
 // unquantized or its config is unreadable.
-func fetchQuantInfo(ctx context.Context, client *hub.Client, modelID string) *quant.Info {
+func fetchQuantInfo(ctx context.Context, client *hub.Client, modelID string) *modelmeta.QuantInfo {
 	files, err := client.ListFiles(ctx, modelID)
 	if err != nil {
 		return nil
@@ -110,5 +110,5 @@ func fetchQuantInfo(ctx context.Context, client *hub.Client, modelID string) *qu
 		}
 		return data
 	}
-	return quant.Parse(fetch("config.json"), fetch("hf_quant_config.json"), fetch("quantize_config.json"))
+	return modelmeta.ParseQuant(fetch("config.json"), fetch("hf_quant_config.json"), fetch("quantize_config.json"))
 }

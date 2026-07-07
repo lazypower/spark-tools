@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/profiles"
 )
@@ -35,7 +35,7 @@ func profileListCmd() *cobra.Command {
 		Short: "List saved profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
+			dirs := runconfig.Dirs()
 			store := profiles.NewProfileStore(dirs.Config)
 
 			list, err := store.List()
@@ -74,7 +74,7 @@ func profileShowCmd() *cobra.Command {
 		Short: "Show profile details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
+			dirs := runconfig.Dirs()
 			store := profiles.NewProfileStore(dirs.Config)
 
 			p, err := store.Get(args[0])
@@ -103,7 +103,7 @@ func profileSaveCmd() *cobra.Command {
 		Short: "Save current config as profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
+			dirs := runconfig.Dirs()
 			store := profiles.NewProfileStore(dirs.Config)
 
 			p := profiles.Profile{
@@ -148,7 +148,7 @@ func profileEditCmd() *cobra.Command {
 		Short: "Edit a profile's configuration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
+			dirs := runconfig.Dirs()
 			store := profiles.NewProfileStore(dirs.Config)
 
 			p, err := store.Get(args[0])
@@ -196,7 +196,7 @@ func profileRmCmd() *cobra.Command {
 		Short: "Delete a profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
+			dirs := runconfig.Dirs()
 			store := profiles.NewProfileStore(dirs.Config)
 
 			if err := store.Delete(args[0]); err != nil {

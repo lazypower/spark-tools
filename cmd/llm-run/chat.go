@@ -9,14 +9,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/modelref"
+	"github.com/lazypower/spark-tools/internal/openaiapi"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 	"github.com/lazypower/spark-tools/internal/tui"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/llmrun/api"
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 	"github.com/lazypower/spark-tools/pkg/llmrun/profiles"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
 )
 
 func chatCmd() *cobra.Command {
@@ -75,7 +75,7 @@ func resolveModelArg(args []string, profileName string) (string, error) {
 
 	// Try profile's model ref.
 	if profileName != "" {
-		dirs := config.Dirs()
+		dirs := runconfig.Dirs()
 		store := profiles.NewProfileStore(dirs.Config)
 		p, err := store.Get(profileName)
 		if err == nil && p.Config.ModelRef != "" {
@@ -84,7 +84,7 @@ func resolveModelArg(args []string, profileName string) (string, error) {
 	}
 
 	// Try global default.
-	gcfg := config.LoadGlobalConfig()
+	gcfg := runconfig.LoadGlobalConfig()
 	if gcfg.DefaultModel != "" {
 		return gcfg.DefaultModel, nil
 	}
@@ -112,8 +112,8 @@ type inferenceFlags struct {
 }
 
 func runInference(modelRef string, flags inferenceFlags) error {
-	dirs := config.Dirs()
-	gcfg := config.LoadGlobalConfig()
+	dirs := runconfig.Dirs()
+	gcfg := runconfig.LoadGlobalConfig()
 
 	// Resolve profile: explicit flag → global default → none.
 	profileName := flags.profileName
@@ -143,7 +143,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 
 	// Resolve model to a local path.
 	hfDirs := hfconfig.Dirs()
-	res := resolver.NewResolver(dirs.Config, hfDirs.Data)
+	res := modelref.NewResolver(dirs.Config, hfDirs.Data)
 	resolved, err := res.ResolveModel(context.Background(), modelRef)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		}
 		readyCancel()
 
-		client := api.NewClient(endpoint)
+		client := openaiapi.NewClient(endpoint)
 		return tui.RunChat(tui.ChatConfig{
 			Client:      client,
 			ModelName:   modelRef,
@@ -300,9 +300,9 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		return fmt.Errorf("--prompt or --prompt-file required for non-interactive mode")
 	}
 
-	client := api.NewClient(endpoint)
-	req := api.ChatCompletionRequest{
-		Messages:  []api.Message{{Role: "user", Content: prompt}},
+	client := openaiapi.NewClient(endpoint)
+	req := openaiapi.ChatCompletionRequest{
+		Messages:  []openaiapi.Message{{Role: "user", Content: prompt}},
 		MaxTokens: flags.maxTokens,
 		Stop: []string{
 			"<|im_start|>", "<|im_end|>",
@@ -310,7 +310,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 		},
 	}
 	if flags.format != "" {
-		req.ResponseFormat = &api.ResponseFormat{Type: flags.format}
+		req.ResponseFormat = &openaiapi.ResponseFormat{Type: flags.format}
 	}
 	resp, err := client.ChatCompletion(context.Background(), req)
 	if err != nil {

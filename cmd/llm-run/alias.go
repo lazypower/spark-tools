@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
+	"github.com/lazypower/spark-tools/internal/modelref"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 )
 
 func aliasCmd() *cobra.Command {
@@ -31,8 +31,8 @@ func aliasSetCmd() *cobra.Command {
 		Short: "Create or update a model alias",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
-			if err := resolver.SetAlias(dirs.Config, args[0], args[1]); err != nil {
+			dirs := runconfig.Dirs()
+			if err := modelref.SetAlias(dirs.Config, args[0], args[1]); err != nil {
 				return err
 			}
 			fmt.Printf("Alias %q → %s\n", args[0], args[1])
@@ -47,8 +47,8 @@ func aliasRmCmd() *cobra.Command {
 		Short: "Remove a model alias",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
-			if err := resolver.RemoveAlias(dirs.Config, args[0]); err != nil {
+			dirs := runconfig.Dirs()
+			if err := modelref.RemoveAlias(dirs.Config, args[0]); err != nil {
 				return err
 			}
 			fmt.Printf("Alias %q removed.\n", args[0])
@@ -63,8 +63,8 @@ func aliasListCmd() *cobra.Command {
 		Short: "List all model aliases",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs := config.Dirs()
-			aliases, err := resolver.ListAliases(dirs.Config)
+			dirs := runconfig.Dirs()
+			aliases, err := modelref.ListAliases(dirs.Config)
 			if err != nil {
 				return err
 			}

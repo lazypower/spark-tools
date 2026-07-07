@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 func listCmd() *cobra.Command {
@@ -20,7 +20,7 @@ func listCmd() *cobra.Command {
 			showPath, _ := cmd.Flags().GetBool("path")
 
 			dirs := config.Dirs()
-			reg := registry.New(dirs.Data)
+			reg := modelstore.New(dirs.Data)
 			if err := reg.Load(); err != nil {
 				return err
 			}
@@ -76,7 +76,7 @@ func pathCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs := config.Dirs()
-			reg := registry.New(dirs.Data)
+			reg := modelstore.New(dirs.Data)
 			if err := reg.Load(); err != nil {
 				return err
 			}

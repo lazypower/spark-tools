@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/serveinstance"
 	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
@@ -68,7 +68,7 @@ func TestSeam_EmitLabels_ProtectArtifact(t *testing.T) {
 	// artifact dir — even with NO manifest (orphan case), proving the live half
 	// reads what emit stamped.
 	container := runtime.ServiceState{Name: "coder-next", Running: true, Labels: labels}
-	lv := liveness.New(instance.NewStore(t.TempDir()), &seamRuntime{managed: []runtime.ServiceState{container}})
+	lv := liveness.New(serveinstance.NewStore(t.TempDir()), &seamRuntime{managed: []runtime.ServiceState{container}})
 
 	if !lv.IsProtected(context.Background(), coder) {
 		t.Error("SEAM CONTRACT BROKEN: a running emitted container must protect its host artifact dir")

@@ -18,9 +18,9 @@ import (
 	"github.com/lazypower/spark-tools/internal/fileset"
 	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/hubsource"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/hfetch/source"
 )
 
 // defaultPullProfile is the fileset selector used when none is given — one
@@ -277,7 +277,7 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 	}
 
 	// Set up output directory.
-	reg := registry.New(dirs.Data)
+	reg := modelstore.New(dirs.Data)
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 		}
 
 		// Shared adapter: size + hash from the tree listing (the authority).
-		src := source.New(client, modelID, remoteFile, fileSizeMap[remoteFile], fileHashMap[remoteFile])
+		src := hubsource.New(client, modelID, remoteFile, fileSizeMap[remoteFile], fileHashMap[remoteFile])
 
 		startTime := time.Now()
 
@@ -380,7 +380,7 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 
 		// Register the downloaded file.
 		quant := gguf.ParseQuantFromFilename(localFile)
-		reg.AddFile(modelID, registry.LocalFile{
+		reg.AddFile(modelID, modelstore.LocalFile{
 			Filename:     localFile,
 			Size:         fileSizeMap[remoteFile],
 			SHA256:       fileHashMap[remoteFile], // canonical upstream hash (provenance)
@@ -474,7 +474,7 @@ func redactToken(token string) string {
 	return token[:8] + "..."
 }
 
-// tokenSourceLabel returns a human-readable label for a token source.
+// tokenSourceLabel returns a human-readable label for a token hubsource.
 func tokenSourceLabel(src string) string {
 	switch src {
 	case "flag":

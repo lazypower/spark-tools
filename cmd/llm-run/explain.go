@@ -8,12 +8,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/modelref"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 	"github.com/lazypower/spark-tools/pkg/llmrun/profiles"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
 )
 
 func explainCmd() *cobra.Command {
@@ -34,7 +34,7 @@ Available topics:
   top-p            Nucleus sampling
   top-k            Top-K sampling
 
-Use 'llm-run explain effective <model>' to show the full computed config.`,
+Use 'llm-run explain effective <model>' to show the full computed runconfig.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] == "effective" {
@@ -174,8 +174,8 @@ func explainTopic(topic string) error {
 }
 
 func showEffectiveConfig(modelRef, profileName string) error {
-	dirs := config.Dirs()
-	gcfg := config.LoadGlobalConfig()
+	dirs := runconfig.Dirs()
+	gcfg := runconfig.LoadGlobalConfig()
 
 	headerStyle := lipgloss.NewStyle().Bold(true)
 
@@ -196,7 +196,7 @@ func showEffectiveConfig(modelRef, profileName string) error {
 
 	// Resolve model.
 	hfDirs := hfconfig.Dirs()
-	res := resolver.NewResolver(dirs.Config, hfDirs.Data)
+	res := modelref.NewResolver(dirs.Config, hfDirs.Data)
 	resolved, err := res.ResolveModel(context.Background(), modelRef)
 	if err != nil {
 		return fmt.Errorf("resolving model: %w", err)

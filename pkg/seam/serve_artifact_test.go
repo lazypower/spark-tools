@@ -10,13 +10,13 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/fingerprint"
 	"github.com/lazypower/spark-tools/internal/hub"
+	"github.com/lazypower/spark-tools/internal/serveartifact"
+	"github.com/lazypower/spark-tools/internal/servecontract"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
-	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 )
 
 // Seam: hfetch's completeness gate (pkg/hfetch/fileset) <-> llm-serve's emit
-// refusal (pkg/llmserve/artifact.Verify).
+// refusal (pkg/llmserve/serveartifact.Verify).
 //
 // CONTRACT: llm-serve must NOT emit a launch for an artifact hfetch would not
 // certify serve-ready. The gate is hfetch's single authority (design §5);
@@ -68,7 +68,7 @@ func TestSeam_ServeRefusesIncompleteArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := artifact.Verify(repo, dir)
+	_, err := serveartifact.Verify(repo, dir)
 	if err == nil {
 		t.Fatal("SEAM CONTRACT BROKEN: llm-serve emitted facts for an artifact missing a weight shard; it must delegate to hfetch's gate and refuse")
 	}
@@ -80,7 +80,7 @@ func TestSeam_ServeRefusesIncompleteArtifact(t *testing.T) {
 func TestSeam_ServeAcceptsCompleteArtifact_AndResolves(t *testing.T) {
 	dir, repo := completeArtifact(t)
 
-	facts, err := artifact.Verify(repo, dir)
+	facts, err := serveartifact.Verify(repo, dir)
 	if err != nil {
 		t.Fatalf("a complete artifact must pass the gate and yield facts, got: %v", err)
 	}
@@ -88,8 +88,8 @@ func TestSeam_ServeAcceptsCompleteArtifact_AndResolves(t *testing.T) {
 		t.Fatalf("detected facts wrong: %+v", facts)
 	}
 
-	// And those verified facts resolve into a validated launch contract.
-	got, err := contract.Resolve(contract.Request{
+	// And those verified facts resolve into a validated launch servecontract.
+	got, err := servecontract.Resolve(servecontract.Request{
 		ServedName: "qwen-36b-fp4",
 		Target:     fingerprint.Fingerprint{Engine: "vllm/vllm-openai@v0.23.0", Accelerator: "nvidia:gb10:sm121"},
 	}, facts)
@@ -120,15 +120,15 @@ func TestSeam_ServeRejectsUnservableQuant(t *testing.T) {
 		plainFile(t, dir, "generation_config.json", `{}`),
 	}
 
-	facts, err := artifact.Verify(repo, dir)
+	facts, err := serveartifact.Verify(repo, dir)
 	if err != nil {
 		t.Fatalf("artifact is complete; the gate should pass, got: %v", err)
 	}
-	_, err = contract.Resolve(contract.Request{
+	_, err = servecontract.Resolve(servecontract.Request{
 		ServedName: "qwen-awq",
 		Target:     fingerprint.Fingerprint{Engine: "vllm/vllm-openai@v0.23.0", Accelerator: "nvidia:gb10:sm121"},
 	}, facts)
-	re, ok := contract.AsRejection(err)
+	re, ok := servecontract.AsRejection(err)
 	if !ok {
 		t.Fatalf("an unservable quant must be rejected, not emitted; got %v", err)
 	}

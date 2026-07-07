@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/servecontract"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
+	"github.com/lazypower/spark-tools/internal/servespec"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
-	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 )
 
@@ -25,7 +25,7 @@ type PlanRequest struct {
 	Image        string // engine image digest/tag (also the target engine fingerprint)
 	Accelerator  string // target accelerator fingerprint
 	Port         int    // host port (default 8000)
-	Mounts       []emit.Mount
+	Mounts       []servespec.Mount
 	WatchdogDir  string // host dir holding watchdog.sh (required for a serving instance)
 }
 
@@ -34,8 +34,8 @@ type PlanRequest struct {
 // lifecycle.Plan and the resolved contract (for surfacing warnings). The same
 // IdentityLabels definition is used to stamp the spec here and to verify it in
 // reconcile, so they cannot drift.
-func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
-	if !instance.ValidName(req.Name) {
+func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error) {
+	if !serveinstance.ValidName(req.Name) {
 		return lifecycle.Plan{}, nil, fmt.Errorf("invalid instance name %q", req.Name)
 	}
 	served := req.ServedName
@@ -47,7 +47,7 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 		port = 8000
 	}
 
-	// Resolve all host paths to ABSOLUTE at emit. The emitted spec is persisted
+	// Resolve all host paths to ABSOLUTE at servespec. The emitted spec is persisted
 	// under XDG state and run by `docker compose` from THAT directory — a
 	// caller-cwd-relative mount (e.g. ./models) would resolve against the spec's
 	// dir, not the operator's cwd, and silently mount the wrong (empty) path. A
@@ -71,19 +71,19 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 		}
 	}
 
-	creq := contract.Request{
+	creq := servecontract.Request{
 		ServedName:   served,
 		Capabilities: req.Capabilities,
 		ContextLen:   req.ContextLen,
 		Target:       fingerprint.Fingerprint{Engine: req.Image, Accelerator: req.Accelerator},
 	}
-	resolved, err := contract.Resolve(creq, facts)
+	resolved, err := servecontract.Resolve(creq, facts)
 	if err != nil {
 		return lifecycle.Plan{}, nil, err
 	}
 
 	project := "llm-serve-" + req.Name
-	desired := instance.Desired{
+	desired := serveinstance.Desired{
 		Name:          req.Name,
 		ServedName:    served,
 		ModelID:       facts.ModelID,
@@ -97,19 +97,19 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 
 	// Host without labels first, so the spec hash (a label) is computed over the
 	// command/image/mounts, not over itself.
-	host := emit.Host{
+	host := servespec.Host{
 		Image:   imageRef(req.Image),
 		Port:    port,
 		Volumes: mounts,
 	}
 	if watchdogDir != "" {
-		host.Watchdog = &emit.Watchdog{ScriptHostDir: watchdogDir, Project: project}
+		host.Watchdog = &servespec.Watchdog{ScriptHostDir: watchdogDir, Project: project}
 	}
-	desired.SpecHash = emit.SpecHash(resolved, host)
+	desired.SpecHash = servespec.SpecHash(resolved, host)
 
 	// Now stamp the identity labels (which include the spec hash) and render.
 	host.Labels = lifecycle.IdentityLabels(desired)
-	spec, err := emit.Render(emit.TargetCompose, resolved, host)
+	spec, err := servespec.Render(servespec.TargetCompose, resolved, host)
 	if err != nil {
 		return lifecycle.Plan{}, nil, err
 	}
@@ -120,14 +120,14 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *contract.Resolved, error) {
 // absoluteMounts resolves each mount's HOST path to absolute (its container path
 // is already absolute). This is what makes the persisted spec self-contained: a
 // relative host path would otherwise resolve against the spec's storage dir.
-func absoluteMounts(in []emit.Mount) ([]emit.Mount, error) {
-	out := make([]emit.Mount, len(in))
+func absoluteMounts(in []servespec.Mount) ([]servespec.Mount, error) {
+	out := make([]servespec.Mount, len(in))
 	for i, m := range in {
 		abs, err := filepath.Abs(m.Host)
 		if err != nil {
 			return nil, fmt.Errorf("resolving mount host %q to absolute: %w", m.Host, err)
 		}
-		out[i] = emit.Mount{Host: abs, Container: m.Container}
+		out[i] = servespec.Mount{Host: abs, Container: m.Container}
 	}
 	return out, nil
 }

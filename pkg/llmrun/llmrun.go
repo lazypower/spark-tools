@@ -8,12 +8,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/lazypower/spark-tools/internal/modelref"
+	"github.com/lazypower/spark-tools/internal/runconfig"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/llmrun/config"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 	"github.com/lazypower/spark-tools/pkg/llmrun/profiles"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
 )
 
 // Re-export commonly used types so consumers only need to import llmrun.
@@ -28,7 +28,7 @@ type (
 	GPUInfo       = hardware.GPUInfo
 	Profile       = profiles.Profile
 	ProfileStore  = profiles.ProfileStore
-	ResolvedModel = resolver.ResolvedModel
+	ResolvedModel = modelref.ResolvedModel
 )
 
 // Re-export constants.
@@ -42,9 +42,9 @@ const (
 type Option func(*engineOptions)
 
 type engineOptions struct {
-	llamaDir string
+	llamaDir  string
 	configDir string
-	dataDir  string
+	dataDir   string
 	hfDataDir string
 }
 
@@ -72,9 +72,9 @@ func WithHFDataDir(dir string) Option {
 type Engine struct {
 	caps     *Capabilities
 	hw       *HardwareInfo
-	resolver *resolver.Resolver
+	resolver *modelref.Resolver
 	profiles *ProfileStore
-	dirs     config.DirConfig
+	dirs     runconfig.DirConfig
 	dataDir  string
 }
 
@@ -86,7 +86,7 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	}
 
 	// Resolve directories.
-	dirs := config.Dirs()
+	dirs := runconfig.Dirs()
 	if o.configDir != "" {
 		dirs.Config = o.configDir
 	}
@@ -102,7 +102,7 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	// Detect llama.cpp.
 	llamaDir := o.llamaDir
 	if llamaDir == "" {
-		gcfg := config.LoadGlobalConfig()
+		gcfg := runconfig.LoadGlobalConfig()
 		llamaDir = gcfg.LlamaDir
 	}
 	caps, err := engine.DetectBinaries(llamaDir)
@@ -116,14 +116,14 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	return &Engine{
 		caps:     caps,
 		hw:       hw,
-		resolver: resolver.NewResolver(dirs.Config, hfDataDir),
+		resolver: modelref.NewResolver(dirs.Config, hfDataDir),
 		profiles: profiles.NewProfileStore(dirs.Config),
 		dirs:     dirs,
 		dataDir:  dirs.Data,
 	}, nil
 }
 
-// Launch starts an inference process with the given config.
+// Launch starts an inference process with the given runconfig.
 func (e *Engine) Launch(ctx context.Context, cfg RunConfig) (*Process, error) {
 	return engine.Launch(ctx, cfg, *e.caps, e.dataDir)
 }

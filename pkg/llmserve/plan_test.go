@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/servespec"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 )
 
@@ -27,7 +27,7 @@ func TestBuildPlan_SpecHasLabelsWatchdogAndContainerPath(t *testing.T) {
 		Capabilities: []serving.Capability{ToolCalling, GuidedDecoding},
 		Image:        "vllm/vllm-openai@v0.23.0",
 		Accelerator:  "nvidia:gb10:sm121",
-		Mounts:       []emit.Mount{{Host: "/srv/models", Container: "/models/hf"}},
+		Mounts:       []servespec.Mount{{Host: "/srv/models", Container: "/models/hf"}},
 		WatchdogDir:  "/var/lib/llm-serve/watchdog",
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestBuildPlan_LabelsMatchReconcileDefinition(t *testing.T) {
 		Facts:       qwenFacts(),
 		Image:       "vllm/vllm-openai@v0.23.0",
 		Accelerator: "nvidia:gb10:sm121",
-		Mounts:      []emit.Mount{{Host: "/srv/models", Container: "/models/hf"}},
+		Mounts:      []servespec.Mount{{Host: "/srv/models", Container: "/models/hf"}},
 		WatchdogDir: "/wd",
 	})
 	if err != nil {
@@ -93,7 +93,7 @@ func TestBuildPlan_ResolvesRelativeMountToAbsolute(t *testing.T) {
 		Facts:       qwenFacts(),
 		Image:       "vllm/vllm-openai@v0.23.0",
 		Accelerator: "nvidia:gb10:sm121",
-		Mounts:      []emit.Mount{{Host: "./models", Container: "/models/hf"}},
+		Mounts:      []servespec.Mount{{Host: "./models", Container: "/models/hf"}},
 		WatchdogDir: "wd",
 	})
 	if err != nil {

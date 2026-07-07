@@ -15,14 +15,14 @@ import (
 	"path/filepath"
 
 	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serveartifact"
+	"github.com/lazypower/spark-tools/internal/servecontract"
+	"github.com/lazypower/spark-tools/internal/serveinstance"
+	"github.com/lazypower/spark-tools/internal/serveprofiles"
+	"github.com/lazypower/spark-tools/internal/servespec"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
-	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
-	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
-	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
-	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
 )
 
@@ -33,12 +33,12 @@ type (
 	ArtifactFacts = serving.ArtifactFacts
 	ContractKey   = serving.ContractKey
 	Fingerprint   = fingerprint.Fingerprint
-	Request       = contract.Request
-	Resolved      = contract.Resolved
-	ArchProfile   = profiles.ArchProfile
-	Host          = emit.Host
-	Mount         = emit.Mount
-	Target        = emit.Target
+	Request       = servecontract.Request
+	Resolved      = servecontract.Resolved
+	ArchProfile   = serveprofiles.ArchProfile
+	Host          = servespec.Host
+	Mount         = servespec.Mount
+	Target        = servespec.Target
 
 	// B1 lifecycle re-exports.
 	Orchestrator    = lifecycle.Orchestrator
@@ -60,20 +60,20 @@ const (
 // validated contract behind it, and the render target used.
 type EmitResult struct {
 	Spec     string
-	Resolved *contract.Resolved
-	Target   emit.Target
+	Resolved *servecontract.Resolved
+	Target   servespec.Target
 }
 
 // Emit resolves a request against the supplied verified artifact facts and
 // renders it for the given target and host. It is the one-call path: the caller
 // is responsible for having obtained facts from a VERIFIED artifact (see
 // DetectFacts / VerifyArtifact), since Emit trusts the artifact gate upstream.
-func Emit(req contract.Request, facts serving.ArtifactFacts, target emit.Target, host emit.Host) (*EmitResult, error) {
-	resolved, err := contract.Resolve(req, facts)
+func Emit(req servecontract.Request, facts serving.ArtifactFacts, target servespec.Target, host servespec.Host) (*EmitResult, error) {
+	resolved, err := servecontract.Resolve(req, facts)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := emit.Render(target, resolved, host)
+	spec, err := servespec.Render(target, resolved, host)
 	if err != nil {
 		return nil, err
 	}
@@ -83,20 +83,20 @@ func Emit(req contract.Request, facts serving.ArtifactFacts, target emit.Target,
 // DetectFacts reads serving facts from a local model directory whose
 // completeness has already been verified (e.g. by an hfetch pull).
 func DetectFacts(dir string) (serving.ArtifactFacts, error) {
-	return artifact.DetectFacts(dir)
+	return serveartifact.DetectFacts(dir)
 }
 
 // BuiltinProfiles returns the v1 arch-profile registry.
-func BuiltinProfiles() []profiles.ArchProfile { return profiles.BuiltinProfiles() }
+func BuiltinProfiles() []serveprofiles.ArchProfile { return serveprofiles.BuiltinProfiles() }
 
 // Targets returns the supported render targets.
-func Targets() []emit.Target { return emit.Targets() }
+func Targets() []servespec.Target { return servespec.Targets() }
 
 // NewOrchestrator wires the B1 lifecycle over the real compose runtime and HTTP
 // prober, with manifests under stateDir and emitted specs under specDir.
 func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
 	return &lifecycle.Orchestrator{
-		Store:   instance.NewStore(stateDir),
+		Store:   serveinstance.NewStore(stateDir),
 		Runtime: runtime.NewCompose(),
 		Prober:  runtime.NewHTTPProber(),
 		SpecDir: specDir,
@@ -107,7 +107,7 @@ func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
 // real compose runtime. It answers "is this artifact protected from eviction?"
 // for tools like llm-tidy — derived live, fail-closed.
 func NewLiveness(stateDir string) *liveness.Liveness {
-	return liveness.New(instance.NewStore(stateDir), runtime.NewCompose())
+	return liveness.New(serveinstance.NewStore(stateDir), runtime.NewCompose())
 }
 
 // EnsureWatchdogScript writes the embedded watchdog.sh into dir (idempotently) so
@@ -116,7 +116,7 @@ func EnsureWatchdogScript(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "watchdog.sh"), []byte(emit.WatchdogScript), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "watchdog.sh"), []byte(servespec.WatchdogScript), 0755); err != nil {
 		return "", err
 	}
 	return dir, nil

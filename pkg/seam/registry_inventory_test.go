@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/lazypower/spark-tools/internal/inventory"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 )
 
 // Seam: hfetch registry (writer) <-> llm-tidy inventory (reader).
@@ -20,7 +20,7 @@ import (
 // green when llm-tidy stops treating non-.gguf registry files as GGUF.
 func TestSeam_RegistryVLLMEntry_NotSurfacedAsGGUF(t *testing.T) {
 	dir := t.TempDir()
-	reg := registry.New(dir)
+	reg := modelstore.New(dir)
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestSeam_RegistryVLLMEntry_NotSurfacedAsGGUF(t *testing.T) {
 		"config.json",
 		"tokenizer.json",
 	} {
-		reg.AddFile(repo, registry.LocalFile{Filename: f, Complete: true})
+		reg.AddFile(repo, modelstore.LocalFile{Filename: f, Complete: true})
 	}
 	if err := reg.Save(); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestSeam_RegistryVLLMEntry_NotSurfacedAsGGUF(t *testing.T) {
 // inventory (the B3-teeth slice) — one row at model-directory granularity, so
 // llm-tidy can prune it and the eviction interlock can protect the served path.
 func TestSeam_RegistryVLLMEntry_SurfacedAsVLLM(t *testing.T) {
-	reg := registry.New(t.TempDir())
+	reg := modelstore.New(t.TempDir())
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSeam_RegistryVLLMEntry_SurfacedAsVLLM(t *testing.T) {
 		"config.json",
 		"tokenizer.json",
 	} {
-		reg.AddFile(repo, registry.LocalFile{Filename: f, Complete: true, LocalPath: "/srv/models/Qwen/" + f, Size: 1})
+		reg.AddFile(repo, modelstore.LocalFile{Filename: f, Complete: true, LocalPath: "/srv/models/Qwen/" + f, Size: 1})
 	}
 	if err := reg.Save(); err != nil {
 		t.Fatal(err)

@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/openaiapi"
 	"github.com/lazypower/spark-tools/internal/tui"
 	"github.com/lazypower/spark-tools/internal/version"
-	"github.com/lazypower/spark-tools/pkg/llmrun/api"
 )
 
 func main() {
@@ -35,11 +35,11 @@ func rootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			endpoint := strings.TrimRight(args[0], "/")
 
-			var opts []api.Option
+			var opts []openaiapi.Option
 			if apiKey != "" {
-				opts = append(opts, api.WithAPIKey(apiKey))
+				opts = append(opts, openaiapi.WithAPIKey(apiKey))
 			}
-			client := api.NewClient(endpoint, opts...)
+			client := openaiapi.NewClient(endpoint, opts...)
 
 			cfg := tui.ChatConfig{
 				Client:    client,
@@ -51,9 +51,9 @@ func rootCmd() *cobra.Command {
 				cfg.ModelName = endpoint
 			}
 
-			var messages []api.Message
+			var messages []openaiapi.Message
 			if system != "" {
-				messages = append(messages, api.Message{
+				messages = append(messages, openaiapi.Message{
 					Role:    "system",
 					Content: system,
 				})

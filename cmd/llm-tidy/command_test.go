@@ -17,10 +17,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/internal/reconcile"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
 )
 
 func model(name string, b inventory.ModelBackend, size int64) inventory.InstalledModel {
@@ -157,7 +157,7 @@ func TestEmitStatusJSON_Contract(t *testing.T) {
 		Untracked: []inventory.InstalledModel{model("vl", inventory.BackendVLLM, 200)},
 		Missing: []reconcile.ModelSpec{{
 			Backend: inventory.BackendGGUF,
-			GGUF:    &manifest.GGUFModelSpec{Repo: "org/model", Quant: "Q4_K_M"},
+			GGUF:    &tidymanifest.GGUFModelSpec{Repo: "org/model", Quant: "Q4_K_M"},
 		}},
 	}
 	avail := inventory.Available{Ollama: true, GGUF: false, VLLM: true}
@@ -212,8 +212,8 @@ func TestRootCmd_Wiring(t *testing.T) {
 
 func TestCountSpecs(t *testing.T) {
 	m := &llmtidy.Manifest{
-		Ollama: []manifest.OllamaModelSpec{{Name: "a"}, {Name: "b"}},
-		GGUF:   []manifest.GGUFModelSpec{{Repo: "x"}},
+		Ollama: []tidymanifest.OllamaModelSpec{{Name: "a"}, {Name: "b"}},
+		GGUF:   []tidymanifest.GGUFModelSpec{{Repo: "x"}},
 	}
 	if ol, gg := countSpecs(m, inventory.BackendUnknown); ol != 2 || gg != 1 {
 		t.Errorf("unfiltered counts = %d/%d, want 2/1", ol, gg)
@@ -240,7 +240,7 @@ func hermeticTidy(t *testing.T, manifestBody string) *llmtidy.Tidy {
 	}))
 	t.Cleanup(ollama.Close)
 
-	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	mpath := filepath.Join(t.TempDir(), "tidymanifest.yaml")
 	if manifestBody != "" {
 		if err := os.WriteFile(mpath, []byte(manifestBody), 0o644); err != nil {
 			t.Fatal(err)
@@ -338,7 +338,7 @@ func TestRunSync_BackendFilterConstrainsPulls(t *testing.T) {
 	}))
 	t.Cleanup(ollamaSrv.Close)
 
-	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	mpath := filepath.Join(t.TempDir(), "tidymanifest.yaml")
 	body := "version: 1\nollama:\n  - name: foo\ngguf:\n  - repo: org/missing-model\n    quant: Q4_K_M\n"
 	if err := os.WriteFile(mpath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -375,7 +375,7 @@ func TestRunSync_ToleratesUnreachableBackend(t *testing.T) {
 	deadURL := dead.URL
 	dead.Close() // now refuses connections
 
-	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	mpath := filepath.Join(t.TempDir(), "tidymanifest.yaml")
 	// The Ollama spec is "missing" (Ollama is down, so nothing was inventoried).
 	body := "version: 1\nollama:\n  - name: llama3\ngguf: []\n"
 	if err := os.WriteFile(mpath, []byte(body), 0o644); err != nil {
@@ -445,11 +445,11 @@ func TestRunPrune_DryRunWithUntracked_InterlockInactive(t *testing.T) {
 	if err := os.WriteFile(ggufPath, []byte("weights"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reg := registry.New(dataDir)
+	reg := modelstore.New(dataDir)
 	if err := reg.Load(); err != nil {
 		t.Fatal(err)
 	}
-	reg.AddFile("org/model", registry.LocalFile{
+	reg.AddFile("org/model", modelstore.LocalFile{
 		Filename: "model.gguf", Size: 7, Quantization: "Q4_K_M",
 		LocalPath: ggufPath, Complete: true, DownloadedAt: time.Now(),
 	})
@@ -462,7 +462,7 @@ func TestRunPrune_DryRunWithUntracked_InterlockInactive(t *testing.T) {
 	}))
 	t.Cleanup(ollama.Close)
 
-	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	mpath := filepath.Join(t.TempDir(), "tidymanifest.yaml")
 	if err := os.WriteFile(mpath, []byte("version: 1\ngguf: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func TestRunPrune_DryRunWithUntracked_InterlockInactive(t *testing.T) {
 
 func TestInitCmd_WritesManifest(t *testing.T) {
 	// Drive the real cobra command end to end: hermetic Ollama via OLLAMA_HOST,
-	// empty GGUF registry via HFETCH_DATA_DIR. init scans both and writes a manifest.
+	// empty GGUF registry via HFETCH_DATA_DIR. init scans both and writes a tidymanifest.
 	t.Setenv("HFETCH_DATA_DIR", t.TempDir())
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"models":[]}`)
@@ -529,7 +529,7 @@ func runRootHermetic(t *testing.T, manifestBody string, args ...string) (string,
 	t.Cleanup(ollama.Close)
 	t.Setenv("OLLAMA_HOST", ollama.URL)
 
-	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	mpath := filepath.Join(t.TempDir(), "tidymanifest.yaml")
 	if manifestBody != "" {
 		if err := os.WriteFile(mpath, []byte(manifestBody), 0o644); err != nil {
 			t.Fatal(err)

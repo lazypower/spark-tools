@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lazypower/spark-tools/internal/modelref"
 	"github.com/lazypower/spark-tools/pkg/llmbench/job"
 	"github.com/lazypower/spark-tools/pkg/llmbench/metrics"
 	"github.com/lazypower/spark-tools/pkg/llmbench/store"
-	"github.com/lazypower/spark-tools/pkg/llmrun/resolver"
 )
 
 func testRunResult() *store.RunResult {
@@ -23,7 +23,7 @@ func testRunResult() *store.RunResult {
 				JobID:        "model-a-Q4_K_M-throughput-1",
 				ScenarioName: "throughput",
 				Status:       job.JobStatusOK,
-				Model: resolver.ResolvedModel{
+				Model: modelref.ResolvedModel{
 					NormalizedRef: "owner/model-a:Q4_K_M",
 					Quant:         "Q4_K_M",
 				},

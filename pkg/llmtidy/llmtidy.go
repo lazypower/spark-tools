@@ -11,20 +11,20 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/internal/ollama"
 	"github.com/lazypower/spark-tools/internal/reconcile"
+	"github.com/lazypower/spark-tools/internal/tidymanifest"
 	"github.com/lazypower/spark-tools/pkg/hfetch"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
 )
 
 // Re-exports keep callers from importing every sub-package.
 type (
-	Manifest        = manifest.Manifest
-	OllamaModelSpec = manifest.OllamaModelSpec
-	GGUFModelSpec   = manifest.GGUFModelSpec
+	Manifest        = tidymanifest.Manifest
+	OllamaModelSpec = tidymanifest.OllamaModelSpec
+	GGUFModelSpec   = tidymanifest.GGUFModelSpec
 	InstalledModel  = inventory.InstalledModel
 	Backend         = inventory.ModelBackend
 	DiffResult      = reconcile.DiffResult
@@ -37,8 +37,8 @@ const (
 )
 
 // ErrManifestNotFound is re-exported so callers can detect the
-// "run llm-tidy init" remediation without importing manifest.
-var ErrManifestNotFound = manifest.ErrNotFound
+// "run llm-tidy init" remediation without importing tidymanifest.
+var ErrManifestNotFound = tidymanifest.ErrNotFound
 
 // PartialInventoryError reports that one or more backends could not be listed
 // (e.g. an unreachable Ollama daemon on a GGUF-only box) while a usable partial
@@ -107,7 +107,7 @@ func New(opts ...Option) (*Tidy, error) {
 		o(cfg)
 	}
 
-	path, err := manifest.Resolve(cfg.manifestPath)
+	path, err := tidymanifest.Resolve(cfg.manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest path: %w", err)
 	}
@@ -120,7 +120,7 @@ func New(opts ...Option) (*Tidy, error) {
 	}
 
 	dirs := hfconfig.Dirs()
-	reg := registry.New(dirs.Data)
+	reg := modelstore.New(dirs.Data)
 
 	checker := cfg.checker
 	if checker == nil {
@@ -145,11 +145,11 @@ func (t *Tidy) Provider() *inventory.Provider { return t.provider }
 
 // LoadManifest reads and validates the manifest from disk.
 func (t *Tidy) LoadManifest() (*Manifest, error) {
-	m, err := manifest.Load(t.manifestPath)
+	m, err := tidymanifest.Load(t.manifestPath)
 	if err != nil {
 		return nil, err
 	}
-	if err := manifest.Validate(m); err != nil {
+	if err := tidymanifest.Validate(m); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -157,10 +157,10 @@ func (t *Tidy) LoadManifest() (*Manifest, error) {
 
 // SaveManifest writes the manifest to disk after validating it.
 func (t *Tidy) SaveManifest(m *Manifest) error {
-	if err := manifest.Validate(m); err != nil {
+	if err := tidymanifest.Validate(m); err != nil {
 		return err
 	}
-	return manifest.Save(m, t.manifestPath)
+	return tidymanifest.Save(m, t.manifestPath)
 }
 
 // Inventory returns the unified installed-model list across both backends.
@@ -265,7 +265,7 @@ func (t *Tidy) Promote(ctx context.Context, model string, backend Backend) error
 
 	switch match.Backend {
 	case inventory.BackendOllama:
-		spec := manifest.OllamaModelSpec{Name: match.OllamaName}
+		spec := tidymanifest.OllamaModelSpec{Name: match.OllamaName}
 		for _, existing := range m.Ollama {
 			if existing.NormalizedName() == spec.NormalizedName() {
 				return fmt.Errorf("model %q already in manifest", spec.NormalizedName())
@@ -273,7 +273,7 @@ func (t *Tidy) Promote(ctx context.Context, model string, backend Backend) error
 		}
 		m.Ollama = append(m.Ollama, spec)
 	case inventory.BackendGGUF:
-		spec := manifest.GGUFModelSpec{Repo: match.Repo, Quant: match.Quant}
+		spec := tidymanifest.GGUFModelSpec{Repo: match.Repo, Quant: match.Quant}
 		for _, existing := range m.GGUF {
 			if strings.EqualFold(existing.Repo, spec.Repo) && existing.Quant == spec.Quant {
 				return fmt.Errorf("gguf %s %s already in manifest", spec.Repo, spec.Quant)
@@ -281,7 +281,7 @@ func (t *Tidy) Promote(ctx context.Context, model string, backend Backend) error
 		}
 		m.GGUF = append(m.GGUF, spec)
 	case inventory.BackendVLLM:
-		spec := manifest.VLLMModelSpec{Repo: match.Repo}
+		spec := tidymanifest.VLLMModelSpec{Repo: match.Repo}
 		for _, existing := range m.VLLM {
 			if strings.EqualFold(existing.Repo, spec.Repo) {
 				return fmt.Errorf("vllm %s already in manifest", spec.Repo)
@@ -299,7 +299,7 @@ func (t *Tidy) Demote(_ context.Context, model string) error {
 	if err != nil {
 		return err
 	}
-	normalized := manifest.NormalizeOllamaName(model)
+	normalized := tidymanifest.NormalizeOllamaName(model)
 
 	for i, spec := range m.Ollama {
 		if spec.NormalizedName() == normalized || spec.Name == model {
@@ -339,33 +339,33 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Manifest{Version: manifest.SchemaVersion}
+	m := &Manifest{Version: tidymanifest.SchemaVersion}
 	seenOllama := make(map[string]bool)
 	seenGGUF := make(map[string]bool)
 	seenVLLM := make(map[string]bool)
 	for _, im := range inv {
 		switch im.Backend {
 		case inventory.BackendOllama:
-			key := manifest.NormalizeOllamaName(im.OllamaName)
+			key := tidymanifest.NormalizeOllamaName(im.OllamaName)
 			if seenOllama[key] {
 				continue
 			}
 			seenOllama[key] = true
-			m.Ollama = append(m.Ollama, manifest.OllamaModelSpec{Name: im.OllamaName})
+			m.Ollama = append(m.Ollama, tidymanifest.OllamaModelSpec{Name: im.OllamaName})
 		case inventory.BackendGGUF:
 			key := strings.ToLower(im.Repo) + "|" + im.Quant
 			if seenGGUF[key] {
 				continue
 			}
 			seenGGUF[key] = true
-			m.GGUF = append(m.GGUF, manifest.GGUFModelSpec{Repo: im.Repo, Quant: im.Quant})
+			m.GGUF = append(m.GGUF, tidymanifest.GGUFModelSpec{Repo: im.Repo, Quant: im.Quant})
 		case inventory.BackendVLLM:
 			key := strings.ToLower(im.Repo)
 			if seenVLLM[key] {
 				continue
 			}
 			seenVLLM[key] = true
-			m.VLLM = append(m.VLLM, manifest.VLLMModelSpec{Repo: im.Repo})
+			m.VLLM = append(m.VLLM, tidymanifest.VLLMModelSpec{Repo: im.Repo})
 		}
 	}
 	if err := t.SaveManifest(m); err != nil {
@@ -378,8 +378,8 @@ func (t *Tidy) Init(ctx context.Context) (*Manifest, error) {
 // is missing. Used by Promote so the first promotion bootstraps the file.
 func (t *Tidy) LoadOrInit() (*Manifest, error) {
 	m, err := t.LoadManifest()
-	if errors.Is(err, manifest.ErrNotFound) {
-		return &Manifest{Version: manifest.SchemaVersion}, nil
+	if errors.Is(err, tidymanifest.ErrNotFound) {
+		return &Manifest{Version: tidymanifest.SchemaVersion}, nil
 	}
 	return m, err
 }
@@ -454,7 +454,7 @@ func (s *defaultSyncer) PullGGUF(ctx context.Context, repo, quant string, onStat
 
 func findInstalled(inv []InstalledModel, model string, backend Backend) (InstalledModel, error) {
 	repo, quant := splitRepoQuant(model)
-	normalizedOllama := manifest.NormalizeOllamaName(model)
+	normalizedOllama := tidymanifest.NormalizeOllamaName(model)
 
 	var candidates []InstalledModel
 	for _, im := range inv {
@@ -463,7 +463,7 @@ func findInstalled(inv []InstalledModel, model string, backend Backend) (Install
 		}
 		switch im.Backend {
 		case inventory.BackendOllama:
-			if manifest.NormalizeOllamaName(im.OllamaName) == normalizedOllama {
+			if tidymanifest.NormalizeOllamaName(im.OllamaName) == normalizedOllama {
 				candidates = append(candidates, im)
 			}
 		case inventory.BackendGGUF:

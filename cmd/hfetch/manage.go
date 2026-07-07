@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/modelstore"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 func rmCmd() *cobra.Command {
@@ -16,7 +16,7 @@ func rmCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs := config.Dirs()
-			reg := registry.New(dirs.Data)
+			reg := modelstore.New(dirs.Data)
 			if err := reg.Load(); err != nil {
 				return err
 			}
@@ -49,7 +49,7 @@ func gcCmd() *cobra.Command {
 		Short: "Remove partial downloads and orphaned files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs := config.Dirs()
-			reg := registry.New(dirs.Data)
+			reg := modelstore.New(dirs.Data)
 			if err := reg.Load(); err != nil {
 				return err
 			}
