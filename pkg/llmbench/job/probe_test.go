@@ -2,11 +2,40 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// A server that accepts the connection but never finishes streaming must not
+// hang the run: the per-request timeout must fire and return an error promptly.
+func TestProbeRequest_TimeoutOnStalledServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // stall until the client gives up
+	}))
+	defer server.Close()
+
+	start := time.Now()
+	result := probeRequest(context.Background(), server.URL, "Hello", 100, 0.0, 150*time.Millisecond)
+	elapsed := time.Since(start)
+	if result.Err == nil {
+		t.Fatal("a stalled server must produce a timeout error, not hang")
+	}
+	if !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Errorf("error should be a deadline: %v", result.Err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("timeout did not fire promptly, took %v", elapsed)
+	}
+}
 
 func TestProbeRequest_MockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +59,7 @@ func TestProbeRequest_MockServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := probeRequest(context.Background(), server.URL, "Hello", 100, 0.0)
+	result := probeRequest(context.Background(), server.URL, "Hello", 100, 0.0, 0)
 	if result.Err != nil {
 		t.Fatalf("probeRequest: %v", result.Err)
 	}
@@ -63,7 +92,7 @@ func TestProbeRequest_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := probeRequest(context.Background(), server.URL, "Hello", 100, 0.0)
+	result := probeRequest(context.Background(), server.URL, "Hello", 100, 0.0, 0)
 	if result.Err == nil {
 		t.Error("expected error for server error")
 	}

@@ -4,6 +4,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -33,6 +34,10 @@ type ExecParams struct {
 	Temperature    float64
 	WarmupPrompts  int
 	MeasurePrompts int
+	// Timeout bounds a single request. A server that accepts the connection but
+	// stops streaming would otherwise hang an unattended run forever. Zero means
+	// no per-request bound.
+	Timeout time.Duration
 }
 
 // Executor runs individual benchmark jobs.
@@ -152,7 +157,7 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 
 	// Warmup
 	if params.WarmupPrompts > 0 {
-		if err := sendWarmupPrompts(ctx, endpoint, prompts, params.WarmupPrompts, params.MaxTokens, params.Temperature); err != nil {
+		if err := sendWarmupPrompts(ctx, endpoint, prompts, params.WarmupPrompts, params.MaxTokens, params.Temperature, params.Timeout); err != nil {
 			result.Status = JobStatusFailed
 			result.Error = &JobError{Type: "warmup", Message: err.Error()}
 			result.Duration = Duration{time.Since(start)}
@@ -173,7 +178,7 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 
 	if params.ParallelSlots > 1 {
 		// Parallel load testing
-		measureParallel(ctx, endpoint, prompts, measurePrompts, params.ParallelSlots, params.MaxTokens, params.Temperature, collector)
+		measureParallel(ctx, endpoint, prompts, measurePrompts, params.ParallelSlots, params.MaxTokens, params.Temperature, params.Timeout, collector)
 	} else {
 		// Sequential measurement
 		for i := 0; i < measurePrompts; i++ {
@@ -188,10 +193,10 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 			}
 
 			promptIdx := i % len(prompts)
-			pr := probeRequest(ctx, endpoint, prompts[promptIdx], params.MaxTokens, params.Temperature)
+			pr := probeRequest(ctx, endpoint, prompts[promptIdx], params.MaxTokens, params.Temperature, params.Timeout)
 			if pr.Err != nil {
 				result.Status = JobStatusFailed
-				result.Error = &JobError{Type: "probe", Message: pr.Err.Error()}
+				result.Error = &JobError{Type: probeErrorType(pr.Err), Message: pr.Err.Error()}
 				result.Duration = Duration{time.Since(start)}
 				result.SystemMetrics = sampler.Stop()
 				return result
@@ -216,7 +221,16 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 	return result
 }
 
-func measureParallel(ctx context.Context, endpoint string, prompts []string, totalPrompts, slots int, maxTokens int, temperature float64, collector *metrics.Collector) {
+// probeErrorType classifies a probe failure: a deadline (the per-request
+// timeout firing on a stalled server) is a "timeout", everything else "probe".
+func probeErrorType(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "probe"
+}
+
+func measureParallel(ctx context.Context, endpoint string, prompts []string, totalPrompts, slots int, maxTokens int, temperature float64, timeout time.Duration, collector *metrics.Collector) {
 	promptsPerSlot := totalPrompts / slots
 	if promptsPerSlot < 1 {
 		promptsPerSlot = 1
@@ -243,7 +257,7 @@ func measureParallel(ctx context.Context, endpoint string, prompts []string, tot
 				default:
 				}
 				promptIdx := (offset + i) % len(prompts)
-				pr := probeRequest(ctx, endpoint, prompts[promptIdx], maxTokens, temperature)
+				pr := probeRequest(ctx, endpoint, prompts[promptIdx], maxTokens, temperature, timeout)
 				mu.Lock()
 				results = append(results, pr)
 				mu.Unlock()

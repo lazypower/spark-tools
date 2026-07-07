@@ -210,6 +210,7 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 			Temperature:    js.Temperature,
 			WarmupPrompts:  js.WarmupPrompts,
 			MeasurePrompts: js.MeasurePrompts,
+			Timeout:        js.Timeout.Duration,
 		}
 		jr := executor.Execute(ctx, params, promptList)
 		result.Jobs = append(result.Jobs, jr)

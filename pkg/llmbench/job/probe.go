@@ -23,7 +23,16 @@ type probeResult struct {
 // probeRequest sends a streaming chat completion request to llama-server,
 // measures TTFT and end-to-end latency, and extracts timings from the
 // final SSE chunk.
-func probeRequest(ctx context.Context, endpoint string, prompt string, maxTokens int, temperature float64) probeResult {
+func probeRequest(ctx context.Context, endpoint string, prompt string, maxTokens int, temperature float64, timeout time.Duration) probeResult {
+	// Bound the whole request — including the streaming body read — so a server
+	// that connects then stalls cannot hang the run. Ties to the request context
+	// via NewRequestWithContext below.
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	temp := &temperature
 	reqBody := struct {
 		Model       string      `json:"model"`
