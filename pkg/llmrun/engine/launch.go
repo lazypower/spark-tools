@@ -36,7 +36,11 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
 
-	pidFile := filepath.Join(dataDir, "server.pid")
+	// Key the PID file by port. A single global server.pid made every launch
+	// (chat/serve/run/bench) mutually exclusive even on different ports; keying
+	// by port means only a genuine same-port conflict is refused, and the
+	// "already running" error then names the port that is actually in use.
+	pidFile := pidFilePath(dataDir, cfg)
 
 	// Check for existing PID file.
 	if err := checkPIDFile(pidFile, cfg); err != nil {
@@ -84,11 +88,7 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		if host == "" {
 			host = "127.0.0.1"
 		}
-		port := cfg.Port
-		if port == 0 {
-			port = 8080
-		}
-		endpoint = fmt.Sprintf("http://%s:%d", host, port)
+		endpoint = fmt.Sprintf("http://%s:%d", host, serverPort(cfg))
 	}
 
 	handle := &processHandle{
@@ -151,11 +151,24 @@ func checkPIDFile(pidFile string, cfg RunConfig) error {
 		return nil
 	}
 
-	port := cfg.Port
-	if port == 0 {
-		port = 8080
+	return fmt.Errorf("server already running (PID %d) on port %d", pid, serverPort(cfg))
+}
+
+// defaultServerPort is llama-server's port when the config leaves it unset.
+const defaultServerPort = 8080
+
+// serverPort resolves the effective server port — the single authority for the
+// default, shared by the endpoint, the PID file name, and conflict messages.
+func serverPort(cfg RunConfig) int {
+	if cfg.Port == 0 {
+		return defaultServerPort
 	}
-	return fmt.Errorf("server already running (PID %d) on port %d", pid, port)
+	return cfg.Port
+}
+
+// pidFilePath returns the per-port PID file path in dataDir.
+func pidFilePath(dataDir string, cfg RunConfig) string {
+	return filepath.Join(dataDir, fmt.Sprintf("server-%d.pid", serverPort(cfg)))
 }
 
 // Wait blocks until the process exits.
