@@ -4,11 +4,22 @@
   "shell": {
     "init_hook": [],
     "scripts": {
-      "build": ["go build ./..."],
+      "build": [
+        "go build -o hfetch ./cmd/hfetch",
+        "go build -o llm-run ./cmd/llm-run",
+        "go build -o llm-bench ./cmd/llm-bench",
+        "go build -o llm-chat ./cmd/llm-chat",
+        "go build -o llm-serve ./cmd/llm-serve",
+        "go build -o llm-tidy ./cmd/llm-tidy",
+        "echo 'Built: hfetch llm-run llm-bench llm-chat llm-serve llm-tidy'"
+      ],
       "test": ["go test ./..."],
       "hfetch": ["go build -o hfetch ./cmd/hfetch && echo 'Built: ./hfetch'"],
       "llm-run": ["go build -o llm-run ./cmd/llm-run && echo 'Built: ./llm-run'"],
-      "llm-bench": ["go build -o llm-bench ./cmd/llm-bench && echo 'Built: ./llm-bench'"]
+      "llm-bench": ["go build -o llm-bench ./cmd/llm-bench && echo 'Built: ./llm-bench'"],
+      "llm-chat": ["go build -o llm-chat ./cmd/llm-chat && echo 'Built: ./llm-chat'"],
+      "llm-serve": ["go build -o llm-serve ./cmd/llm-serve && echo 'Built: ./llm-serve'"],
+      "llm-tidy": ["go build -o llm-tidy ./cmd/llm-tidy && echo 'Built: ./llm-tidy'"]
     }
   }
 }

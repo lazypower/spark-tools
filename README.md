@@ -1,16 +1,30 @@
 # Spark Tools
 
-Pure Go toolchain for local LLM workflows on DGX Spark hardware. Four tools, zero cgo, one dependency chain.
+Pure Go toolchain for local LLM workflows on DGX Spark hardware. Six tools, zero cgo, one dependency chain.
 
 ```
 hfetch ──▶ llm-run ──▶ llm-bench
- model       inference     benchmarks
- management  engine        & analysis
+ model       GGUF          benchmarks
+ management  inference     & analysis
+   │           │
+   │           └──▶ llm-tidy      inventory management
    │
-   └──▶ llm-tidy
-        inventory
-        management
+   └──▶ llm-serve   safetensors (vLLM) serving
+        llm-chat    chat against any OpenAI-compatible endpoint
 ```
+
+## Which tool when
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Get a model from HuggingFace | **hfetch** | GGUF *or* serve-ready safetensors |
+| Run a **GGUF** model locally | **llm-run** | llama.cpp wrapper, hardware-aware defaults |
+| Serve a **safetensors** model | **llm-serve** | vLLM launch-spec engine + compose lifecycle |
+| Chat against an existing endpoint | **llm-chat** | any OpenAI-compatible server (llama.cpp, vLLM, gateways) |
+| Benchmark models | **llm-bench** | declarative, reproducible suites |
+| Prune / reconcile your model store | **llm-tidy** | desired-state manifest across Ollama + hfetch |
+
+The routing rule that decides the serving path: **GGUF → llm-run**, **safetensors → llm-serve**. `llm-run chat` and `llm-chat` overlap deliberately — `llm-run chat` launches a llama.cpp server *and* chats; `llm-chat` only chats, against a server you already have.
 
 ## hfetch
 
@@ -199,6 +213,32 @@ A starter manifest lives at [`examples/llm-tidy/manifest.yaml`](examples/llm-tid
 | `LLM_TIDY_CONFIG_DIR` | Config directory holding `manifest.yaml` |
 | `OLLAMA_HOST` | Ollama server address (same variable Ollama itself reads) |
 
+## llm-serve
+
+vLLM contract engine for **safetensors** models. Turns `{model + capabilities + ctx + hardware}` into a validated, host-appropriate vLLM launch spec — rejecting footgun flag combinations — and can bring the instance up and down via Docker Compose.
+
+```sh
+llm-serve emit org/model --ctx 32768         # Print the validated launch spec (compose/quadlet)
+llm-serve profiles                            # List capability profiles
+llm-serve up org/model --ctx 32768            # Launch + wait for the instance to serve
+llm-serve status                              # Show managed instances and readiness
+llm-serve down org/model                      # Tear an instance down
+llm-serve recover                             # Reconcile manifests against live containers
+```
+
+Pull the weights first with `hfetch pull org/model --dest vllm` (the completeness gate guarantees a serve-ready fileset), then hand the directory to `llm-serve`.
+
+## llm-chat
+
+Standalone chat TUI for **any** OpenAI-compatible endpoint — llama.cpp, vLLM, or a hosted gateway. No model management, no launch: it talks to a server you already have.
+
+```sh
+llm-chat --endpoint http://localhost:8080     # Chat against a running server
+llm-chat --endpoint http://host:8000 --model my-model
+```
+
+In-TUI commands: `/stats`, `/context`, `/system <prompt>`, `/temp <value>`, `/save <file>`, `/clear`, `/quit`. (To launch a llama.cpp server *and* chat in one step, use `llm-run chat` instead.)
+
 ## Install
 
 Requires Go 1.25+ (via [devbox](https://www.jetify.com/devbox)):
@@ -206,7 +246,7 @@ Requires Go 1.25+ (via [devbox](https://www.jetify.com/devbox)):
 ```sh
 git clone https://github.com/lazypower/spark-tools.git
 cd spark-tools
-devbox run build    # Builds all four binaries
+devbox run build    # Builds all six binaries into the repo root
 ```
 
 Or build individually:
@@ -215,6 +255,8 @@ Or build individually:
 devbox run -- go build ./cmd/hfetch
 devbox run -- go build ./cmd/llm-run
 devbox run -- go build ./cmd/llm-bench
+devbox run -- go build ./cmd/llm-chat
+devbox run -- go build ./cmd/llm-serve
 devbox run -- go build ./cmd/llm-tidy
 ```
 
@@ -226,6 +268,8 @@ All tools follow the [XDG Base Directory Specification](https://specifications.f
 |------|--------|------|-------|
 | hfetch | `~/.config/hfetch/` | `~/.local/share/hfetch/` | `~/.cache/hfetch/` |
 | llm-run | `~/.config/llm-run/` | `~/.local/share/llm-run/` | `~/.cache/llm-run/` |
+| llm-serve | `~/.config/llm-serve/` | `~/.local/share/llm-serve/` | — |
+| llm-chat | — (endpoint-only) | — | — |
 | llm-bench | `~/.config/llm-bench/` | `~/.local/share/llm-bench/` | `~/.cache/llm-bench/` |
 | llm-tidy | `~/.config/llm-tidy/` | (reuses hfetch data dir) | — |
 

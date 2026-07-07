@@ -1,22 +1,29 @@
 # Spark Tools
 
-A Go monorepo providing four tools for local LLM workflows on DGX Spark hardware:
+A Go monorepo providing six tools for local LLM workflows on DGX Spark hardware:
 - **hfetch** — HuggingFace Hub client (model discovery, download, GGUF metadata)
-- **llm-run** — llama.cpp wrapper (ergonomic inference, smart defaults, profiles)
-- **llm-bench** — Benchmark suite (declarative, automated, reproducible)
+- **llm-run** — llama.cpp wrapper for GGUF (ergonomic inference, smart defaults, profiles)
+- **llm-serve** — vLLM contract engine for safetensors (validated launch spec + compose lifecycle)
 - **llm-chat** — Standalone chat TUI for any OpenAI-compatible endpoint
+- **llm-bench** — Benchmark suite (declarative, automated, reproducible)
+- **llm-tidy** — Model inventory management (desired-state manifest, prune/sync)
+
+Serving routing rule: GGUF → llm-run, safetensors → llm-serve.
 
 ## Build & Test
 
 All Go commands must use devbox:
 
 ```sh
-devbox run -- go build ./...           # Build everything
+devbox run build                       # Build all six binaries into the repo root
+devbox run -- go build ./...           # Compile-check everything (no binaries)
 devbox run -- go test ./...            # Run all tests
-devbox run -- go build ./cmd/hfetch    # Build single binary
+devbox run -- go build ./cmd/hfetch    # Build a single binary
 devbox run -- go build ./cmd/llm-run
-devbox run -- go build ./cmd/llm-bench
+devbox run -- go build ./cmd/llm-serve
 devbox run -- go build ./cmd/llm-chat
+devbox run -- go build ./cmd/llm-bench
+devbox run -- go build ./cmd/llm-tidy
 ```
 
 ## Repository Layout
@@ -24,12 +31,16 @@ devbox run -- go build ./cmd/llm-chat
 ```
 cmd/hfetch/          CLI entrypoint for hfetch
 cmd/llm-run/         CLI entrypoint for llm-run
-cmd/llm-bench/       CLI entrypoint for llm-bench
+cmd/llm-serve/       CLI entrypoint for llm-serve
 cmd/llm-chat/        CLI entrypoint for llm-chat
+cmd/llm-bench/       CLI entrypoint for llm-bench
+cmd/llm-tidy/        CLI entrypoint for llm-tidy
 pkg/hfetch/          hfetch library packages (api, auth, config, download, gguf, registry)
 pkg/llmrun/          llm-run library packages (engine, resolver, profiles, hardware, api, config)
+pkg/llmserve/        llm-serve library packages (runtime, lifecycle, servespec, contract)
 pkg/llmbench/        llm-bench library packages (suite, job, metrics, prompts, report, store, syscheck)
-internal/            Shared internal packages (progress, ui, tui)
+pkg/llmtidy/         llm-tidy library packages (interlock, inventory, reconcile, ollama)
+internal/            Shared internal packages (extraction targets: tui, modelstore, fileset, …)
 specs/               Design specifications (read-only reference)
 prompts/             Built-in benchmark prompt sets
 ```

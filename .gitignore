@@ -3,6 +3,8 @@
 /llm-run
 /llm-bench
 /llm-chat
+/llm-serve
+/llm-tidy
 /hfetch-*
 *.exe
 
