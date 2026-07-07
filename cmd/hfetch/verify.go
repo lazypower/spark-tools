@@ -97,19 +97,21 @@ func verifyOne(ctx context.Context, client *api.Client, reg *registry.Registry, 
 	// verified by the completeness gate.
 	lm := reg.Get(modelID)
 	var ggufRefs []fileset.FileRef
-	nonGGUF := 0
+	hasSafetensors := false
 	if lm != nil {
 		for _, f := range lm.Files {
 			if !f.Complete {
 				continue
 			}
-			if strings.HasSuffix(strings.ToLower(f.Filename), ".gguf") {
+			name := strings.ToLower(f.Filename)
+			switch {
+			case strings.HasSuffix(name, ".gguf"):
 				ggufRefs = append(ggufRefs, fileset.FileRef{
 					Filename:  f.Filename,
-					LocalPath: ggufLocalPath(f, output),
+					LocalPath: ggufLocalPath(f, output, reg.ModelDir(modelID)),
 				})
-			} else {
-				nonGGUF++
+			case strings.HasSuffix(name, ".safetensors"):
+				hasSafetensors = true
 			}
 		}
 	}
@@ -125,8 +127,10 @@ func verifyOne(ctx context.Context, client *api.Client, reg *registry.Registry, 
 	}
 
 	// Safetensors/vLLM fileset, or a model not tracked in the registry (fall
-	// back to the directory gate). Skipped for a GGUF-only model.
-	if nonGGUF > 0 || lm == nil {
+	// back to the directory gate). A GGUF model with a few loose config files
+	// must NOT trip the safetensors gate — only an actual safetensors weight set
+	// (or an untracked model) does.
+	if hasSafetensors || lm == nil {
 		localDir := output
 		if localDir == "" {
 			localDir = reg.ModelDir(modelID)
@@ -155,15 +159,18 @@ func verifyOne(ctx context.Context, client *api.Client, reg *registry.Registry, 
 }
 
 // ggufLocalPath resolves where a recorded GGUF file lives: its registry
-// LocalPath normally, or under the --output override directory when set.
-func ggufLocalPath(f registry.LocalFile, output string) string {
+// LocalPath normally, or under the --output override directory when set. When
+// neither is available it falls back to the registry's model dir — never to a
+// bare (cwd-relative) filename, which could verify an unrelated file in the
+// working directory and pass without proving the registered download exists.
+func ggufLocalPath(f registry.LocalFile, output, modelDir string) string {
 	if output != "" {
 		return filepath.Join(output, filepath.Base(f.Filename))
 	}
 	if f.LocalPath != "" {
 		return f.LocalPath
 	}
-	return f.Filename
+	return filepath.Join(modelDir, filepath.Base(f.Filename))
 }
 
 // printVerifyReport renders a completeness report's warnings and failures and

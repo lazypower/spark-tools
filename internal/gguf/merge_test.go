@@ -303,6 +303,32 @@ func TestMergeShards_RejectsIncompleteShardSet(t *testing.T) {
 	}
 }
 
+// split.count declared only on a later (not the first sorted) shard must still
+// be honored — a missing shard cannot slip through because shard 0 lacked the key.
+func TestMergeShards_RejectsIncompleteSet_CountOnLaterShard(t *testing.T) {
+	dir := t.TempDir()
+	shard0 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(0)}, // no split.count on the first shard
+		[]testTensor{{Name: "a.weight", Dims: []uint64{16, 4}, Type: 0, Data: bytes.Repeat([]byte{0xAA}, 64)}},
+	)
+	shard1 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(1), "split.count": uint16(3)},
+		[]testTensor{{Name: "b.weight", Dims: []uint64{32, 4}, Type: 0, Data: bytes.Repeat([]byte{0xBB}, 128)}},
+	)
+	shard0Path := filepath.Join(dir, "model-00001-of-00003.gguf")
+	shard1Path := filepath.Join(dir, "model-00002-of-00003.gguf")
+	mergedPath := filepath.Join(dir, "merged.gguf")
+	if err := os.WriteFile(shard0Path, shard0, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shard1Path, shard1, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeShards([]string{shard0Path, shard1Path}, mergedPath); err == nil {
+		t.Fatal("an incomplete set must be rejected even when split.count is only on a later shard")
+	}
+}
+
 // A successful merge must not leave its staging temp file behind.
 func TestMergeShards_LeavesNoTempFiles(t *testing.T) {
 	dir := t.TempDir()

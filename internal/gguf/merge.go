@@ -123,7 +123,21 @@ func writeMergedBody(out *os.File, shards []shardInfo, kvs []KV, tensors []Tenso
 // and every index must be distinct and in range — a missing or duplicated shard
 // is rejected rather than silently merged into a truncated model.
 func validateShardSet(shards []shardInfo) error {
-	count := shardKVUint(shards[0], "split.count")
+	// Derive the declared count from ANY shard that carries split.count — the
+	// first sorted shard may lack it while a later one declares an incomplete
+	// set — and require every present declaration to agree.
+	var count uint64
+	for _, s := range shards {
+		c := shardKVUint(s, "split.count")
+		if c == 0 {
+			continue
+		}
+		if count == 0 {
+			count = c
+		} else if c != count {
+			return fmt.Errorf("shards disagree on split.count (%d vs %d)", count, c)
+		}
+	}
 	if count == 0 {
 		return nil // not a declared split set; nothing to validate against
 	}

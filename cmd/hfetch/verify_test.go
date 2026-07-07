@@ -132,6 +132,61 @@ func TestVerifyOne_GGUF_Passes(t *testing.T) {
 	}
 }
 
+// A GGUF model that also recorded a few loose config files must still verify as
+// GGUF (re-hash the .gguf) and NOT trip the safetensors completeness gate, which
+// would hard-fail a GGUF-only repo.
+func TestVerifyOne_GGUFWithLooseConfig_Passes(t *testing.T) {
+	dir := t.TempDir()
+	content := "gguf-quant-bytes"
+	ggufPath := filepath.Join(dir, "model.Q4_K_M.gguf")
+	if err := os.WriteFile(ggufPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(content))
+
+	reg := registry.New(t.TempDir())
+	if err := reg.Load(); err != nil {
+		t.Fatal(err)
+	}
+	reg.AddFile("org/model-GGUF", registry.LocalFile{
+		Filename: "model.Q4_K_M.gguf", LocalPath: ggufPath, SHA256: hex.EncodeToString(sum[:]), Complete: true,
+	})
+	reg.AddFile("org/model-GGUF", registry.LocalFile{
+		Filename: "config.json", LocalPath: cfgPath, Complete: true,
+	})
+
+	tree := fmt.Sprintf(`[
+	  {"type":"file","path":"model.Q4_K_M.gguf","lfs":{"oid":"%s","size":%d}},
+	  {"type":"file","path":"config.json","size":2}
+	]`, hex.EncodeToString(sum[:]), len(content))
+	_, client := treeServer(t, tree)
+	if err := verifyOne(context.Background(), client, reg, "org/model-GGUF", ""); err != nil {
+		t.Fatalf("a GGUF model with a loose config file should verify clean: %v", err)
+	}
+}
+
+// A recorded GGUF with an empty LocalPath must resolve under the registry's
+// model dir, never a bare cwd-relative filename that could verify an unrelated
+// file in the working directory.
+func TestGGUFLocalPath_NeverFallsBackToCwd(t *testing.T) {
+	// Empty LocalPath, no --output → model dir + base.
+	if got := ggufLocalPath(registry.LocalFile{Filename: "sub/model.gguf"}, "", "/data/models/x"); got != filepath.Join("/data/models/x", "model.gguf") {
+		t.Errorf("empty LocalPath must resolve under the model dir, got %q", got)
+	}
+	// --output wins.
+	if got := ggufLocalPath(registry.LocalFile{Filename: "model.gguf", LocalPath: "/reg/model.gguf"}, "/out", "/data"); got != filepath.Join("/out", "model.gguf") {
+		t.Errorf("--output must override, got %q", got)
+	}
+	// LocalPath used when present and no override.
+	if got := ggufLocalPath(registry.LocalFile{Filename: "model.gguf", LocalPath: "/reg/model.gguf"}, "", "/data"); got != "/reg/model.gguf" {
+		t.Errorf("recorded LocalPath must be used, got %q", got)
+	}
+}
+
 // A GGUF file whose on-disk bytes no longer match the upstream oid (bitrot or a
 // truncated download) must fail verification.
 func TestVerifyOne_GGUF_Bitrot_Fails(t *testing.T) {

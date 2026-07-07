@@ -52,6 +52,11 @@ func rootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	// The bare-arg shorthand pulls via the root command, so --token must be
+	// accepted here too — otherwise `hfetch --token X org/model` (a gated or
+	// private pull) errors with "unknown flag" before RunE runs.
+	tokenFlag(root)
+
 	root.AddCommand(
 		searchCmd(),
 		infoCmd(),

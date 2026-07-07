@@ -41,6 +41,31 @@ func TestRootShorthand_RoutesRepoIDToPull(t *testing.T) {
 	}
 }
 
+// The shorthand pulls via the root command, so --token must be accepted there
+// too — otherwise a gated/private `hfetch --token X org/model` fails with
+// "unknown flag" before RunE runs.
+func TestRootShorthand_AcceptsToken(t *testing.T) {
+	orig := runPullFn
+	t.Cleanup(func() { runPullFn = orig })
+
+	var gotToken string
+	runPullFn = func(cmd *cobra.Command, _ string, _ pullFlags) error {
+		gotToken = resolveToken(cmd)
+		return nil
+	}
+
+	cmd := rootCmd()
+	cmd.SetArgs([]string{"--token", "hf_secret", "org/model"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("shorthand with --token should work: %v", err)
+	}
+	if gotToken != "hf_secret" {
+		t.Errorf("shorthand must pass --token through to pull, got %q", gotToken)
+	}
+}
+
 // A single non-repo arg is a typo of a subcommand, not a pull target — it must
 // keep cobra's unknown-command behavior rather than silently showing help.
 func TestRootShorthand_NonRepoArgIsUnknownCommand(t *testing.T) {

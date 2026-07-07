@@ -183,7 +183,7 @@ func asUint64(v any) uint64 {
 		return n
 	case uint32:
 		return uint64(n)
-	case uint16:
+	case uint16: // GGUF split.no / split.count are written as GGUF_TYPE_UINT16
 		return uint64(n)
 	case uint8:
 		return uint64(n)
@@ -191,11 +191,10 @@ func asUint64(v any) uint64 {
 		return uint64(n)
 	case int32:
 		return uint64(n)
-	case int16:
-		return uint64(n)
-	case int8:
-		return uint64(n)
 	default:
+		// Signed 8/16-bit (and anything else) intentionally fall through to 0
+		// rather than being raw-cast: a negative value must not become a huge
+		// unsigned count/alignment.
 		return 0
 	}
 }

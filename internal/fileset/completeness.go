@@ -128,15 +128,24 @@ type FileRef struct {
 // repo listing is a hard failure.
 func VerifyFiles(repoFiles []hub.ModelFile, files []FileRef) *Report {
 	rep := &Report{}
+	repoByPath := make(map[string]hub.ModelFile, len(repoFiles))
 	repoByBase := make(map[string]hub.ModelFile, len(repoFiles))
 	for _, f := range repoFiles {
 		if f.Type == "directory" {
 			continue
 		}
+		repoByPath[f.Filename] = f
 		repoByBase[path.Base(f.Filename)] = f
 	}
 	for _, fr := range files {
-		f, inRepo := repoByBase[path.Base(fr.Filename)]
+		// Prefer an exact repo-path match so a repo with duplicate basenames in
+		// different directories verifies against the right file; fall back to
+		// basename for the common flat-download case where only the base is
+		// recorded.
+		f, inRepo := repoByPath[fr.Filename]
+		if !inRepo {
+			f, inRepo = repoByBase[path.Base(fr.Filename)]
+		}
 		verifyFile(rep, f, inRepo, fr.LocalPath, fr.Filename)
 	}
 	return rep
