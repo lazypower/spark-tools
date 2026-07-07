@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -117,17 +118,26 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if m.cfg.MultiLine && !msg.Alt {
+			// Enter always submits — the reliable binding on every terminal. In
+			// multiline mode Alt+Enter inserts a newline (best-effort; pasted text
+			// also carries newlines). The previous "Enter=newline, Alt+Enter=submit"
+			// left no way to send on macOS terminals that don't map Alt to Meta.
+			if m.cfg.MultiLine && msg.Alt {
 				m.input += "\n"
 			} else {
 				return m.handleSubmit()
 			}
 		case tea.KeyBackspace:
+			// Delete a whole rune, not a byte — byte-slicing corrupts multibyte
+			// characters (é, CJK, emoji).
 			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
+				_, size := utf8.DecodeLastRuneInString(m.input)
+				m.input = m.input[:len(m.input)-size]
 			}
 		case tea.KeyRunes:
-			m.input += string(msg.Runes)
+			// Strip carriage returns from pasted content (bracketed paste can
+			// carry raw \r), which would otherwise corrupt the line.
+			m.input += strings.ReplaceAll(string(msg.Runes), "\r", "")
 		case tea.KeySpace:
 			m.input += " "
 		}
@@ -261,7 +271,7 @@ func (m *chatModel) View() string {
 			m.input))
 		b.WriteString("█\n")
 		if m.cfg.MultiLine {
-			b.WriteString(dimStyle.Render("  Alt+Enter to send"))
+			b.WriteString(dimStyle.Render("  Enter to send · Alt+Enter for newline"))
 			b.WriteString("\n")
 		}
 	}
