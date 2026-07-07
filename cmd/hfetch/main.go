@@ -20,18 +20,33 @@ func main() {
 	}
 }
 
+// runPullFn indirects the bare-arg shorthand's call to runPull so a test can
+// assert that cobra actually reaches the root RunE (rather than rejecting a
+// bare repo id as an unknown subcommand) without performing a real download.
+var runPullFn = runPull
+
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "hfetch",
 		Short:   "HuggingFace client in pure Go",
 		Long:    "hfetch — download, manage, and inspect GGUF models from HuggingFace Hub.",
 		Version: version.Version,
-		// Bare-arg shorthand: hfetch org/model → hfetch pull org/model (interactive)
+		// Bare-arg shorthand: `hfetch org/model` → `hfetch pull org/model`
+		// (interactive). ArbitraryArgs is required — without it cobra rejects the
+		// bare repo id as an unknown subcommand before RunE ever runs. A single
+		// arg that looks like a repo id (has a "/") is pulled with the default
+		// profile; anything else keeps cobra's unknown-command behavior so typos
+		// of real subcommands still get a helpful error.
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && strings.Contains(args[0], "/") {
-				return runPull(cmd, args[0], pullFlags{})
+			switch {
+			case len(args) == 0:
+				return cmd.Help()
+			case len(args) == 1 && strings.Contains(args[0], "/"):
+				return runPullFn(cmd, args[0], pullFlags{profile: defaultPullProfile})
+			default:
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
 			}
-			return cmd.Help()
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,

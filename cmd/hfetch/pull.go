@@ -23,6 +23,10 @@ import (
 	"github.com/lazypower/spark-tools/pkg/hfetch/source"
 )
 
+// defaultPullProfile is the fileset selector used when none is given — one
+// authority shared by the `pull` flag default and the bare-arg shorthand.
+const defaultPullProfile = "gguf"
+
 type pullFlags struct {
 	profile      string
 	dest         string
@@ -50,7 +54,7 @@ func pullCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.profile, "profile", "gguf", "Fileset selector: gguf (pick one quant) or vllm (complete serve-ready set)")
+	cmd.Flags().StringVar(&flags.profile, "profile", defaultPullProfile, "Fileset selector: gguf (pick one quant) or vllm (complete serve-ready set)")
 	cmd.Flags().StringVar(&flags.dest, "dest", "", `Destination preset. "vllm" = --profile vllm into a flat <data>/vllm/models/<name> dir`)
 	cmd.Flags().StringVar(&flags.quant, "quant", "", "Auto-select file by quantization type")
 	cmd.Flags().StringVar(&flags.output, "output", "", "Override download directory")
