@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -264,6 +265,75 @@ func TestMergeShards_NeedsTwoShards(t *testing.T) {
 	err := MergeShards([]string{"/tmp/single.gguf"}, "/tmp/out.gguf")
 	if err == nil {
 		t.Fatal("expected error for single shard")
+	}
+}
+
+// A shard set that declares more shards than were provided (a missing shard)
+// must be rejected, not merged into a truncated model.
+func TestMergeShards_RejectsIncompleteShardSet(t *testing.T) {
+	dir := t.TempDir()
+	// Both shards declare split.count=3, but only 2 are provided.
+	shard0 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(0), "split.count": uint16(3)},
+		[]testTensor{{Name: "a.weight", Dims: []uint64{16, 4}, Type: 0, Data: bytes.Repeat([]byte{0xAA}, 64)}},
+	)
+	shard1 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(1), "split.count": uint16(3)},
+		[]testTensor{{Name: "b.weight", Dims: []uint64{32, 4}, Type: 0, Data: bytes.Repeat([]byte{0xBB}, 128)}},
+	)
+	shard0Path := filepath.Join(dir, "model-00001-of-00003.gguf")
+	shard1Path := filepath.Join(dir, "model-00002-of-00003.gguf")
+	mergedPath := filepath.Join(dir, "merged.gguf")
+	if err := os.WriteFile(shard0Path, shard0, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shard1Path, shard1, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := MergeShards([]string{shard0Path, shard1Path}, mergedPath)
+	if err == nil {
+		t.Fatal("merging an incomplete shard set must fail")
+	}
+	if !strings.Contains(err.Error(), "incomplete shard set") {
+		t.Errorf("error should name the incomplete set: %v", err)
+	}
+	if _, statErr := os.Stat(mergedPath); statErr == nil {
+		t.Error("a rejected merge must not leave an output file")
+	}
+}
+
+// A successful merge must not leave its staging temp file behind.
+func TestMergeShards_LeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	shard0 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(0), "split.count": uint16(2)},
+		[]testTensor{{Name: "a.weight", Dims: []uint64{16, 4}, Type: 0, Data: bytes.Repeat([]byte{0xAA}, 64)}},
+	)
+	shard1 := buildTestGGUFFile(
+		map[string]any{"split.no": uint16(1), "split.count": uint16(2)},
+		[]testTensor{{Name: "b.weight", Dims: []uint64{32, 4}, Type: 0, Data: bytes.Repeat([]byte{0xBB}, 128)}},
+	)
+	shard0Path := filepath.Join(dir, "model-00001-of-00002.gguf")
+	shard1Path := filepath.Join(dir, "model-00002-of-00002.gguf")
+	mergedPath := filepath.Join(dir, "merged.gguf")
+	if err := os.WriteFile(shard0Path, shard0, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shard1Path, shard1, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeShards([]string{shard0Path, shard1Path}, mergedPath); err != nil {
+		t.Fatalf("MergeShards: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".merge-") {
+			t.Errorf("stale temp file left behind: %s", e.Name())
+		}
 	}
 }
 

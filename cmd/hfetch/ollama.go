@@ -217,10 +217,14 @@ func handleSplitModel(files []registry.LocalFile, modelID, quant, dataDir string
 		shardPaths = append(shardPaths, f.LocalPath)
 	}
 
-	// Check if a merged file already exists.
+	// Reuse an existing merged file only if it is a parseable GGUF, not merely
+	// non-empty: a size>0 check would trust a truncated leftover from an
+	// interrupted merge. (MergeShards now writes atomically, so it never
+	// produces such a file itself — this guards legacy/externally-corrupted
+	// ones. Re-merging is idempotent and atomically replaces the bad file.)
 	mergedName := mergedFilename(files[0].Filename)
 	mergedPath := filepath.Join(filepath.Dir(files[0].LocalPath), mergedName)
-	if fi, err := os.Stat(mergedPath); err == nil && fi.Size() > 0 {
+	if isCompleteGGUF(mergedPath) {
 		fmt.Printf("  Using existing merged file: %s\n", mergedName)
 		return mergedPath, modelID, quant, nil
 	}
@@ -233,6 +237,19 @@ func handleSplitModel(files []registry.LocalFile, modelID, quant, dataDir string
 	fmt.Printf("  Merged: %s\n", mergedName)
 
 	return mergedPath, modelID, quant, nil
+}
+
+// isCompleteGGUF reports whether path is a parseable single GGUF file. It guards
+// merged-file reuse: parsing the header confirms the file is a real GGUF (not a
+// truncated leftover or non-GGUF file) before we skip the re-merge.
+func isCompleteGGUF(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, err = gguf.Parse(f)
+	return err == nil
 }
 
 func parseModelRef(ref string) (modelID, quant string) {

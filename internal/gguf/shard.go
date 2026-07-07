@@ -183,9 +183,17 @@ func asUint64(v any) uint64 {
 		return n
 	case uint32:
 		return uint64(n)
+	case uint16:
+		return uint64(n)
+	case uint8:
+		return uint64(n)
 	case int64:
 		return uint64(n)
 	case int32:
+		return uint64(n)
+	case int16:
+		return uint64(n)
+	case int8:
 		return uint64(n)
 	default:
 		return 0

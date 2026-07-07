@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -27,6 +28,12 @@ func MergeShards(shardPaths []string, outputPath string) error {
 
 	shards, err := parseAllShards(shardPaths)
 	if err != nil {
+		return err
+	}
+
+	// Refuse to merge an incomplete shard set. Without this a missing shard
+	// merges "successfully" into a truncated model that looks fine on disk.
+	if err := validateShardSet(shards); err != nil {
 		return err
 	}
 
@@ -61,30 +68,91 @@ func MergeShards(shardPaths []string, outputPath string) error {
 		totalTensors += s.header.TensorCount
 	}
 
-	// Write the merged output file.
-	out, err := os.Create(outputPath)
+	// Write atomically. A merge is multi-GB and can be interrupted (crash, full
+	// disk, Ctrl-C); writing straight to outputPath would leave a truncated file
+	// that the next ollama-import reuses via a size>0 check. Stage in a temp file
+	// in the same directory, fsync, and rename into place so outputPath only ever
+	// appears as a complete merge.
+	tmp, err := os.CreateTemp(filepath.Dir(outputPath), ".merge-*.gguf.tmp")
 	if err != nil {
-		return fmt.Errorf("creating output file: %w", err)
+		return fmt.Errorf("creating temp output: %w", err)
 	}
-	defer out.Close()
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed
 
+	if err := writeMergedBody(tmp, shards, kvs, tensors, totalTensors, alignment); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("syncing merged output: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing merged output: %w", err)
+	}
+	if err := os.Rename(tmpName, outputPath); err != nil {
+		return fmt.Errorf("renaming merged output into place: %w", err)
+	}
+	return nil
+}
+
+// writeMergedBody writes the merged header, alignment padding, and every shard's
+// tensor data into out.
+func writeMergedBody(out *os.File, shards []shardInfo, kvs []KV, tensors []TensorInfo, totalTensors, alignment uint64) error {
 	if err := writeMergedHeader(out, shards[0].header.Version, totalTensors, kvs, tensors); err != nil {
 		return err
 	}
-
 	// Pad header to alignment boundary before data section.
 	if err := padToAlignment(out, alignment); err != nil {
 		return err
 	}
-
 	// Copy tensor data sections from each shard.
 	for i, s := range shards {
 		if err := copyShardData(out, s, alignment, i == len(shards)-1); err != nil {
 			return fmt.Errorf("copying shard %d data: %w", i, err)
 		}
 	}
-
 	return nil
+}
+
+// validateShardSet ensures the provided shards form a complete split set. GGUF
+// split files declare split.count (total shards) and split.no (this shard's
+// 0-based index); if either is absent the shards predate the convention and are
+// accepted as-is. When present, the count must match the number of shards given
+// and every index must be distinct and in range — a missing or duplicated shard
+// is rejected rather than silently merged into a truncated model.
+func validateShardSet(shards []shardInfo) error {
+	count := shardKVUint(shards[0], "split.count")
+	if count == 0 {
+		return nil // not a declared split set; nothing to validate against
+	}
+	if count != uint64(len(shards)) {
+		return fmt.Errorf("incomplete shard set: split.count is %d but %d shard(s) were provided", count, len(shards))
+	}
+	seen := make(map[uint64]bool, len(shards))
+	for _, s := range shards {
+		no := shardKVUint(s, "split.no")
+		if no >= count {
+			return fmt.Errorf("shard %s declares split.no %d, out of range for split.count %d", s.path, no, count)
+		}
+		if seen[no] {
+			return fmt.Errorf("duplicate shard index %d (shard %s)", no, s.path)
+		}
+		seen[no] = true
+	}
+	return nil
+}
+
+// shardKVUint returns the unsigned integer value of a shard header KV, or 0 when
+// the key is absent.
+func shardKVUint(s shardInfo, key string) uint64 {
+	for _, kv := range s.header.KVs {
+		if kv.Key == key {
+			return asUint64(kv.Value)
+		}
+	}
+	return 0
 }
 
 func parseAllShards(paths []string) ([]shardInfo, error) {
