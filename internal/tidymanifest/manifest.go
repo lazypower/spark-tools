@@ -89,6 +89,15 @@ func Load(path string) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("manifest parse error: %w", err)
 	}
+	// Reject multi-document manifests: a stray `---` separator would otherwise
+	// silently drop every entry after the first document, under-blessing models
+	// that prune would then delete. The manifest must be a single document.
+	if err := dec.Decode(new(Manifest)); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("manifest parse error: %w", err)
+		}
+		return nil, fmt.Errorf("manifest parse error: multiple YAML documents found; the manifest must be a single document")
+	}
 	return &m, nil
 }
 
@@ -123,6 +132,12 @@ func Save(m *Manifest, path string) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once renamed
+	// CreateTemp makes the file 0600; the manifest is not secret and callers
+	// expect the prior 0644, so restore it before the rename.
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("cannot set manifest permissions: %w", err)
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return fmt.Errorf("cannot write manifest: %w", err)

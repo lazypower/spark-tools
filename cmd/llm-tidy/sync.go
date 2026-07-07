@@ -45,7 +45,8 @@ func runSync(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory.M
 	}
 	// An unreachable backend is a warning, not a failure: sync the backends
 	// that did respond rather than being unusable on a GGUF-only box.
-	if err := tolerateInventory(w, err); err != nil {
+	partial, err := tolerateInventory(w, err)
+	if err != nil {
 		return err
 	}
 
@@ -55,6 +56,11 @@ func runSync(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory.M
 		backendPtr = &x
 	}
 	plan := reconcile.SyncPlan(*diff, reconcile.SyncOptions{Backend: backendPtr})
+	if partial {
+		// Drop specs whose backend is unreachable: pulling from a down backend
+		// would fail the spec and turn a tolerated sync into a hard error.
+		plan = skipUnavailableSpecs(w, plan, tidy.Provider().Probe(ctx))
+	}
 	if len(plan) == 0 {
 		fmt.Fprintln(w, "Already in sync.")
 		return nil
@@ -81,4 +87,31 @@ func runSync(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory.M
 	}
 	fmt.Fprintf(w, "\nPulled %d models.\n", len(pulled))
 	return nil
+}
+
+// skipUnavailableSpecs drops sync specs whose backend is not currently
+// reachable, printing a per-spec skip note. It keeps a tolerated sync from
+// attempting — and failing — a pull against a backend that is down.
+func skipUnavailableSpecs(w io.Writer, plan []reconcile.ModelSpec, avail inventory.Available) []reconcile.ModelSpec {
+	backendUp := func(b inventory.ModelBackend) bool {
+		switch b {
+		case inventory.BackendOllama:
+			return avail.Ollama
+		case inventory.BackendGGUF:
+			return avail.GGUF
+		case inventory.BackendVLLM:
+			return avail.VLLM
+		default:
+			return true
+		}
+	}
+	var kept []reconcile.ModelSpec
+	for _, s := range plan {
+		if !backendUp(s.Backend) {
+			fmt.Fprintf(w, "  %s [%s] %s (backend unavailable)\n", styleHint.Render("⊘ skipped"), s.Backend.String(), s.Name())
+			continue
+		}
+		kept = append(kept, s)
+	}
+	return kept
 }

@@ -71,8 +71,10 @@ func runPrune(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, opts pruneOp
 		return fmt.Errorf("no manifest found at %s\nRun: llm-tidy init", tidy.ManifestPath())
 	}
 	// An unreachable backend is a warning, not a failure: prune the backends
-	// that did respond rather than being unusable on a GGUF-only box.
-	if err := tolerateInventory(w, err); err != nil {
+	// that did respond rather than being unusable on a GGUF-only box. A down
+	// backend contributes no untracked candidates, so no plan filtering is
+	// needed here.
+	if _, err := tolerateInventory(w, err); err != nil {
 		return err
 	}
 	plan := pruneBuildPlan(*diff, opts)

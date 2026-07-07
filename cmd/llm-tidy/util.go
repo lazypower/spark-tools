@@ -20,13 +20,15 @@ func formatSize(bytes int64) string { return progress.FormatSize(bytes) }
 // e.g. no Ollama daemon on a GGUF-only box) into a warning and proceeds, per
 // spec §5.3 skip-with-warning. Any other error is fatal and returned unchanged.
 // The DiffResult from Diff remains valid over the backends that did respond.
-func tolerateInventory(w io.Writer, err error) error {
+// The bool reports whether the inventory was partial, so a caller (sync) can
+// drop specs for the down backend instead of attempting and failing them.
+func tolerateInventory(w io.Writer, err error) (bool, error) {
 	var partial *llmtidy.PartialInventoryError
 	if errors.As(err, &partial) {
 		fmt.Fprintf(w, "%s %s\n", styleHint.Render("⚠ backend unavailable:"), partial.Error())
-		return nil
+		return true, nil
 	}
-	return err
+	return false, err
 }
 
 // parseDuration extends time.ParseDuration with "d" for days, supporting

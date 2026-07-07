@@ -366,7 +366,9 @@ func TestRunSync_BackendFilterConstrainsPulls(t *testing.T) {
 }
 
 // An unreachable Ollama daemon must warn and proceed, not hard-fail the whole
-// command. Regression for prune/sync being unusable on a GGUF-only box.
+// command, and must not attempt to pull from the down backend (which would turn
+// a tolerated sync into an error). Regression for prune/sync being unusable on
+// a GGUF-only box.
 func TestRunSync_ToleratesUnreachableBackend(t *testing.T) {
 	t.Setenv("HFETCH_DATA_DIR", t.TempDir())
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -374,10 +376,17 @@ func TestRunSync_ToleratesUnreachableBackend(t *testing.T) {
 	dead.Close() // now refuses connections
 
 	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
-	if err := os.WriteFile(mpath, []byte("version: 1\ngguf: []\n"), 0o644); err != nil {
+	// The Ollama spec is "missing" (Ollama is down, so nothing was inventoried).
+	body := "version: 1\nollama:\n  - name: llama3\ngguf: []\n"
+	if err := os.WriteFile(mpath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tidy, err := llmtidy.New(llmtidy.WithManifestPath(mpath), llmtidy.WithOllamaHost(deadURL))
+	rec := &recordingSyncer{}
+	tidy, err := llmtidy.New(
+		llmtidy.WithManifestPath(mpath),
+		llmtidy.WithOllamaHost(deadURL),
+		llmtidy.WithSyncer(rec),
+	)
 	if err != nil {
 		t.Fatalf("build tidy: %v", err)
 	}
@@ -388,6 +397,9 @@ func TestRunSync_ToleratesUnreachableBackend(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "backend unavailable") {
 		t.Errorf("expected an unavailable-backend warning, got:\n%s", buf.String())
+	}
+	if len(rec.ollama) != 0 {
+		t.Errorf("must not attempt to pull from a down backend, attempted: %v", rec.ollama)
 	}
 }
 

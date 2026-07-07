@@ -105,6 +105,41 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+// A stray `---` separator must be rejected, not silently drop every entry after
+// the first document (which would unbless models and let prune delete them).
+func TestLoadRejectsMultipleDocuments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	body := "version: 1\ngguf: []\n---\ngguf:\n  - repo: org/blessed-model\n    quant: Q4_K_M\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected a parse error for a multi-document manifest, got nil")
+	}
+	if !strings.Contains(err.Error(), "manifest parse error") {
+		t.Errorf("error should mention parse error: %v", err)
+	}
+}
+
+// Save must produce a 0644 file, matching the pre-atomic-write behavior rather
+// than CreateTemp's 0600 default.
+func TestSavePreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := Save(&Manifest{Version: 1, Ollama: []OllamaModelSpec{{Name: "a"}}}, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("manifest mode = %o, want 0644", got)
+	}
+}
+
 // An empty manifest file is a well-formed empty manifest, not a parse error —
 // strict decoding must not regress this.
 func TestLoadEmptyFile(t *testing.T) {
