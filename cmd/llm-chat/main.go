@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -43,12 +44,8 @@ func rootCmd() *cobra.Command {
 
 			cfg := tui.ChatConfig{
 				Client:    client,
-				ModelName: model,
+				ModelName: resolveModel(cmd.Context(), client, model),
 				MultiLine: true,
-			}
-
-			if model == "" {
-				cfg.ModelName = endpoint
 			}
 
 			var messages []openaiapi.Message
@@ -64,8 +61,23 @@ func rootCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key for authenticated endpoints")
-	cmd.Flags().StringVar(&model, "model", "", "Model name to display in header")
+	cmd.Flags().StringVar(&model, "model", "", "Model name to send and display (default: ask the server)")
 	cmd.Flags().StringVar(&system, "system", "", "System prompt")
 
 	return cmd
+}
+
+// resolveModel picks the model name to send in requests and show in the header:
+// an explicit --model wins; otherwise the server's first advertised model
+// (/v1/models); otherwise empty, which is omitted from requests so the server
+// uses its default. It NEVER returns the endpoint URL — llama-server ignores the
+// model field but vLLM and gateways 404 on a bogus model like "http://host:8080".
+func resolveModel(ctx context.Context, client *openaiapi.Client, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if resp, err := client.ListModels(ctx); err == nil && resp != nil && len(resp.Data) > 0 {
+		return resp.Data[0].ID
+	}
+	return ""
 }
