@@ -40,4 +40,18 @@ func TestResolveModel(t *testing.T) {
 	if got := resolveModel(ctx, openaiapi.NewClient(dead.URL), ""); got != "" {
 		t.Errorf("an unavailable model list must yield empty, not %q", got)
 	}
+
+	// A multi-model gateway → refuse to guess (the first entry may be an
+	// embeddings/rerank model that would 400 a chat call): empty, not Data[0].
+	multi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			io.WriteString(w, `{"object":"list","data":[{"id":"text-embedding"},{"id":"chat-model"}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer multi.Close()
+	if got := resolveModel(ctx, openaiapi.NewClient(multi.URL), ""); got != "" {
+		t.Errorf("a multi-model server must not be guessed, got %q", got)
+	}
 }
