@@ -55,6 +55,16 @@ func TestSlash_SystemReplacesAndPrepends(t *testing.T) {
 	}
 }
 
+// The command match is case-insensitive, so /System must set the prompt to the
+// text only — not keep the "/System" token in the system message.
+func TestSlash_SystemIsCaseInsensitive(t *testing.T) {
+	m := newModel()
+	m.handleSlashCommand("/System you are a pirate")
+	if len(m.messages) == 0 || m.messages[0].Role != "system" || m.messages[0].Content != "you are a pirate" {
+		t.Fatalf("/System must set the prompt to the text only, got %+v", m.messages)
+	}
+}
+
 func TestSlash_SystemEmptyIsUsageError(t *testing.T) {
 	m := newModel()
 	m.handleSlashCommand("/system   ")

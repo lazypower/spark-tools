@@ -352,7 +352,10 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/system":
-		text := strings.TrimSpace(strings.TrimPrefix(input, "/system"))
+		// Strip the command token as actually typed (parts[0]) rather than a
+		// hardcoded lowercase "/system" — the command match is case-insensitive,
+		// so "/System foo" would otherwise keep "/System" in the prompt text.
+		text := strings.TrimSpace(input[len(parts[0]):])
 		if text == "" {
 			m.err = fmt.Errorf("usage: /system <prompt text>")
 			return m, nil
