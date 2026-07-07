@@ -42,7 +42,7 @@ jobs:
             dir="dist/spark-tools-${VERSION}-${GOOS}-${GOARCH}"
             mkdir -p "${dir}"
 
-            for bin in hfetch llm-run llm-bench llm-chat; do
+            for bin in hfetch llm-run llm-serve llm-chat llm-bench llm-tidy; do
               echo "Building ${bin} for ${GOOS}/${GOARCH}"
               CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
                 go build -ldflags "${LDFLAGS}" -o "${dir}/${bin}" "./cmd/${bin}"
@@ -109,8 +109,10 @@ jobs:
             def install
               bin.install "hfetch"
               bin.install "llm-run"
-              bin.install "llm-bench"
+              bin.install "llm-serve"
               bin.install "llm-chat"
+              bin.install "llm-bench"
+              bin.install "llm-tidy"
             end
 
             test do
