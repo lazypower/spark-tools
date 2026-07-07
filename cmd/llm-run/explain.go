@@ -34,7 +34,7 @@ Available topics:
   top-p            Nucleus sampling
   top-k            Top-K sampling
 
-Use 'llm-run explain effective <model>' to show the full computed runconfig.`,
+Use 'llm-run explain effective <model>' to show the full computed config.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] == "effective" {

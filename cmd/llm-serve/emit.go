@@ -37,7 +37,7 @@ func emitCmd() *cobra.Command {
 		Use:   "emit",
 		Short: "Resolve a serve request and emit a validated vLLM launch spec",
 		Long: "Resolve {model dir + capabilities + hardware} into a validated vLLM launch spec.\n\n" +
-			"The model directory must be an hfetch-verified serveartifact. Pass --repo-tree (a saved\n" +
+			"The model directory must be an hfetch-verified artifact. Pass --repo-tree (a saved\n" +
 			"hfetch tree listing) to re-run the completeness gate before emitting; otherwise the\n" +
 			"artifact is trusted to have been gated at pull time.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
