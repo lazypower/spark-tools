@@ -197,10 +197,12 @@ func (c *Client) readSSEStream(body io.Reader, handler func(StreamDelta)) (*Usag
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if !strings.HasPrefix(line, "data: ") {
+		// SSE allows an optional single space after "data:" — accept both
+		// "data: {...}" and "data:{...}" (some servers omit the space).
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
 			break
@@ -209,6 +211,14 @@ func (c *Client) readSSEStream(body io.Reader, handler func(StreamDelta)) (*Usag
 		var delta StreamDelta
 		if err := json.Unmarshal([]byte(data), &delta); err != nil {
 			continue // skip malformed chunks
+		}
+
+		// A server can emit an error object mid-stream instead of more content
+		// (context overflow, backend failure). Surface it rather than letting it
+		// unmarshal into an empty delta and vanish — the user would otherwise see
+		// an empty reply with no explanation.
+		if delta.Error != nil {
+			return &usage, fmt.Errorf("stream error: %w", delta.Error)
 		}
 
 		// Capture usage from the final chunk (per OpenAI SSE spec).

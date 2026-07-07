@@ -2,6 +2,8 @@
 // OpenAI-compatible /v1/* endpoints.
 package openaiapi
 
+import "fmt"
+
 // ChatCompletionRequest represents an OpenAI-compatible chat completion request.
 type ChatCompletionRequest struct {
 	Model          string          `json:"model,omitempty"`
@@ -102,10 +104,29 @@ type HealthResponse struct {
 
 // StreamDelta represents a single SSE chunk in a streaming response.
 type StreamDelta struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-	Usage   *Usage   `json:"usage,omitempty"` // present in final chunk
+	ID      string       `json:"id"`
+	Object  string       `json:"object"`
+	Created int64        `json:"created"`
+	Model   string       `json:"model"`
+	Choices []Choice     `json:"choices"`
+	Usage   *Usage       `json:"usage,omitempty"` // present in final chunk
+	Error   *StreamError `json:"error,omitempty"` // a mid-stream server error
+}
+
+// StreamError is an error object a server may emit mid-stream (e.g. context
+// overflow, backend failure) instead of more content.
+type StreamError struct {
+	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+	Code    string `json:"code,omitempty"`
+}
+
+func (e *StreamError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Type != "" {
+		return fmt.Sprintf("%s: %s", e.Type, e.Message)
+	}
+	return e.Message
 }

@@ -270,3 +270,51 @@ func TestListModels_HTTPError(t *testing.T) {
 		t.Errorf("expected HTTP 500 in error, got %s", err.Error())
 	}
 }
+
+// SSE allows "data:" with no space after the colon; those events must still be
+// delivered, not silently skipped.
+func TestChatCompletionStream_DataWithoutSpace(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		data, _ := json.Marshal(StreamDelta{Choices: []Choice{{Delta: &Message{Content: "hi"}}}})
+		fmt.Fprintf(w, "data:%s\n\n", data) // no space after "data:"
+		flusher.Flush()
+		fmt.Fprint(w, "data:[DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	var got strings.Builder
+	_, err := NewClient(srv.URL).ChatCompletionStream(context.Background(), ChatCompletionRequest{}, func(d StreamDelta) {
+		if len(d.Choices) > 0 && d.Choices[0].Delta != nil {
+			got.WriteString(d.Choices[0].Delta.Content)
+		}
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if got.String() != "hi" {
+		t.Errorf(`"data:" without a space must still parse, got %q`, got.String())
+	}
+}
+
+// A server can emit an error object mid-stream instead of content; it must
+// surface as an error, not vanish into an empty delta.
+func TestChatCompletionStream_MidStreamError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, `data: {"error":{"message":"context length exceeded","type":"invalid_request_error"}}`+"\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	_, err := NewClient(srv.URL).ChatCompletionStream(context.Background(), ChatCompletionRequest{}, func(StreamDelta) {})
+	if err == nil {
+		t.Fatal("a mid-stream error payload must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "context length exceeded") {
+		t.Errorf("error must include the server message, got: %v", err)
+	}
+}
