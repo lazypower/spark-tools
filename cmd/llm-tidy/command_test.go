@@ -311,6 +311,60 @@ func TestRunSync_AlreadyInSync(t *testing.T) {
 	}
 }
 
+// recordingSyncer records which specs Sync actually pulled, so a test can
+// assert the executed set matches the displayed (filtered) plan.
+type recordingSyncer struct {
+	ollama []string
+	gguf   []string
+}
+
+func (r *recordingSyncer) PullOllama(_ context.Context, name string, _ func(string)) error {
+	r.ollama = append(r.ollama, name)
+	return nil
+}
+
+func (r *recordingSyncer) PullGGUF(_ context.Context, repo, quant string, _ func(string)) error {
+	r.gguf = append(r.gguf, repo+" "+quant)
+	return nil
+}
+
+// A --backend filter shown in the sync plan must also constrain what is pulled.
+// Regression for the display/execute divergence where Sync ignored the filter
+// and pulled the whole unfiltered diff.
+func TestRunSync_BackendFilterConstrainsPulls(t *testing.T) {
+	t.Setenv("HFETCH_DATA_DIR", t.TempDir())
+	ollamaSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[]}`)
+	}))
+	t.Cleanup(ollamaSrv.Close)
+
+	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	body := "version: 1\nollama:\n  - name: foo\ngguf:\n  - repo: org/missing-model\n    quant: Q4_K_M\n"
+	if err := os.WriteFile(mpath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingSyncer{}
+	tidy, err := llmtidy.New(
+		llmtidy.WithManifestPath(mpath),
+		llmtidy.WithOllamaHost(ollamaSrv.URL),
+		llmtidy.WithSyncer(rec),
+	)
+	if err != nil {
+		t.Fatalf("build tidy: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runSync(context.Background(), &buf, tidy, inventory.BackendGGUF, false); err != nil {
+		t.Fatalf("runSync: %v", err)
+	}
+	if len(rec.ollama) != 0 {
+		t.Errorf("--backend gguf must not pull ollama specs, pulled: %v", rec.ollama)
+	}
+	if len(rec.gguf) != 1 || rec.gguf[0] != "org/missing-model Q4_K_M" {
+		t.Errorf("--backend gguf must pull exactly the gguf spec, pulled: %v", rec.gguf)
+	}
+}
+
 func TestRunStatus_MissingManifestGuidance(t *testing.T) {
 	// No manifest file written → guidance to run init, no crash.
 	tidy := hermeticTidy(t, "")

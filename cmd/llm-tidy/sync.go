@@ -69,7 +69,7 @@ func runSync(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory.M
 		return nil
 	}
 
-	pulled, err := tidy.Sync(ctx)
+	pulled, err := tidy.Sync(ctx, plan)
 	for _, m := range pulled {
 		fmt.Fprintf(w, "  ✓ %s\n", m.Name)
 	}

@@ -48,6 +48,7 @@ type config struct {
 	ollamaHost   string
 	hfetchClient *hfetch.Client
 	checker      interlock.Checker
+	syncer       reconcile.Syncer
 }
 
 // WithManifestPath sets an explicit manifest path, overriding env/XDG.
@@ -72,12 +73,20 @@ func WithHfetchClient(client *hfetch.Client) Option {
 	return func(c *config) { c.hfetchClient = client }
 }
 
+// WithSyncer overrides the pull executor used by Sync. The default resolves
+// Ollama pulls and hfetch downloads; tests inject a fake to assert which specs
+// were pulled without touching the network.
+func WithSyncer(s reconcile.Syncer) Option {
+	return func(c *config) { c.syncer = s }
+}
+
 // Tidy is the entry point for the library.
 type Tidy struct {
 	manifestPath string
 	provider     *inventory.Provider
 	hfetch       *hfetch.Client
 	checker      interlock.Checker
+	syncer       reconcile.Syncer
 }
 
 // New builds a Tidy configured per the options.
@@ -112,6 +121,7 @@ func New(opts ...Option) (*Tidy, error) {
 		provider:     &inventory.Provider{Ollama: oc, GGUF: reg, VLLM: reg},
 		hfetch:       cfg.hfetchClient,
 		checker:      checker,
+		syncer:       cfg.syncer,
 	}, nil
 }
 
@@ -189,19 +199,21 @@ func (t *Tidy) Prune(
 	return reconcile.Prune(ctx, t.provider, plan, nil)
 }
 
-// Sync pulls every missing manifest spec via the default syncer. The slice
-// returned names the specs that were successfully pulled.
-func (t *Tidy) Sync(ctx context.Context) ([]InstalledModel, error) {
-	d, err := t.Diff(ctx)
-	if err != nil {
-		return nil, err
-	}
+// Sync pulls the given missing specs via the default syncer. The slice returned
+// names the specs that were successfully pulled.
+//
+// The caller supplies the plan — typically reconcile.SyncPlan applied to Diff —
+// so the set that is executed is exactly the set that was shown to the user. A
+// --backend filter (or any other) applied for display therefore also constrains
+// what is pulled, instead of the CLI printing a filtered plan while Sync pulled
+// the whole unfiltered diff.
+func (t *Tidy) Sync(ctx context.Context, plan []ModelSpec) ([]InstalledModel, error) {
 	syncer, err := t.defaultSyncer()
 	if err != nil {
 		return nil, err
 	}
 	var pulled []InstalledModel
-	err = reconcile.Sync(ctx, syncer, d.Missing, func(e reconcile.SyncEvent) {
+	err = reconcile.Sync(ctx, syncer, plan, func(e reconcile.SyncEvent) {
 		if e.Err != nil || e.Status != "ok" {
 			return
 		}
@@ -351,6 +363,9 @@ func (t *Tidy) LoadOrInit() (*Manifest, error) {
 }
 
 func (t *Tidy) defaultSyncer() (reconcile.Syncer, error) {
+	if t.syncer != nil {
+		return t.syncer, nil
+	}
 	if t.hfetch == nil {
 		client, err := hfetch.NewClient()
 		if err != nil {
