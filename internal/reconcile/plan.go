@@ -19,6 +19,13 @@ type PruneOptions struct {
 // PrunePlan returns the untracked models that should be removed under the
 // given options.
 func PrunePlan(d DiffResult, opts PruneOptions, now time.Time) []inventory.InstalledModel {
+	// A negative cutoff is nonsensical — now-(-d) is a future instant, marking
+	// every model "old enough" and pruning everything. Fail closed: prune
+	// nothing. The CLI already rejects non-positive --older-than; this guards
+	// every other caller of the library.
+	if opts.OlderThan < 0 {
+		return nil
+	}
 	cutoff := time.Time{}
 	if opts.OlderThan > 0 {
 		cutoff = now.Add(-opts.OlderThan)
@@ -28,8 +35,14 @@ func PrunePlan(d DiffResult, opts PruneOptions, now time.Time) []inventory.Insta
 		if opts.Backend != nil && m.Backend != *opts.Backend {
 			continue
 		}
-		if !cutoff.IsZero() && !m.Modified.Before(cutoff) {
-			continue
+		if !cutoff.IsZero() {
+			// With an age filter active, keep (protect) anything not provably
+			// older than the cutoff. A zero Modified time means "age unknown",
+			// which must be treated as protected, not as infinitely old —
+			// otherwise a model whose mtime we failed to read gets deleted.
+			if m.Modified.IsZero() || !m.Modified.Before(cutoff) {
+				continue
+			}
 		}
 		plan = append(plan, m)
 	}

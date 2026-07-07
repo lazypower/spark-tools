@@ -16,6 +16,12 @@ func TestParseDuration(t *testing.T) {
 		{"30d", 30 * 24 * time.Hour, false},
 		{"2h", 2 * time.Hour, false},
 		{"junk", 0, true},
+		// Non-positive durations gate deletion and must be rejected, not
+		// silently treated as "no age filter" (which prunes everything).
+		{"-7d", 0, true},
+		{"0", 0, true},
+		{"0d", 0, true},
+		{"-2h", 0, true},
 	}
 	for _, tc := range cases {
 		got, err := parseDuration(tc.in)

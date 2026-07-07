@@ -85,6 +85,61 @@ func TestLoadInvalidYAML(t *testing.T) {
 	}
 }
 
+// The manifest is a deletion-safety boundary: a misspelled section must be
+// rejected, not silently parsed as an empty list that unblesses every model in
+// it (a cron'd prune would then delete them).
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	// "guff:" instead of "gguf:" — the exact typo the strict decode must catch.
+	body := "version: 1\nguff:\n  - repo: unsloth/Qwen3-32B-GGUF\n    quant: Q4_K_M\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected a parse error for the misspelled section, got nil")
+	}
+	if !strings.Contains(err.Error(), "manifest parse error") {
+		t.Errorf("error should mention parse error: %v", err)
+	}
+}
+
+// An empty manifest file is a well-formed empty manifest, not a parse error —
+// strict decoding must not regress this.
+func TestLoadEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(path)
+	if err != nil {
+		t.Fatalf("empty file should load cleanly: %v", err)
+	}
+	if len(m.Ollama) != 0 || len(m.GGUF) != 0 || len(m.VLLM) != 0 {
+		t.Errorf("empty file should yield an empty manifest: %+v", m)
+	}
+}
+
+// Save must not leave its staging temp file behind after a successful write.
+func TestSaveLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := Save(&Manifest{Version: 1, Ollama: []OllamaModelSpec{{Name: "a"}}}, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("stale temp file left behind: %s", e.Name())
+		}
+	}
+}
+
 func TestSaveDefaultsVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "deep", "nested", "manifest.yaml")

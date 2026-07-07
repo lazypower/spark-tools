@@ -4,8 +4,10 @@
 package tidymanifest
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,8 +76,17 @@ func Load(path string) (*Manifest, error) {
 		return nil, err
 	}
 
+	// The manifest is a deletion-safety boundary: a misspelled section (e.g.
+	// `guff:` instead of `gguf:`) must not silently parse to an empty list and
+	// unbless every model in it. Decode strictly so unknown keys are rejected.
 	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&m); err != nil {
+		if errors.Is(err, io.EOF) {
+			// An empty file is a well-formed empty manifest, not a parse error.
+			return &m, nil
+		}
 		return nil, fmt.Errorf("manifest parse error: %w", err)
 	}
 	return &m, nil
@@ -99,7 +110,31 @@ func Save(m *Manifest, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+
+	// Write atomically: a truncate-then-write that is interrupted (crash, full
+	// disk, concurrent writer) would corrupt the manifest and, because Load
+	// hard-errors on a bad parse, brick every llm-tidy command until it is
+	// hand-repaired. Stage in a temp file in the same directory, fsync, then
+	// rename into place so a reader ever sees only the old or the new file.
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-manifest-*")
+	if err != nil {
+		return fmt.Errorf("cannot create temp manifest: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("cannot write manifest: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("cannot sync manifest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("cannot close manifest: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("cannot write manifest: %w", err)
 	}
 	return nil

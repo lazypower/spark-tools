@@ -158,6 +158,46 @@ func TestPrunePlanFiltersAge(t *testing.T) {
 	}
 }
 
+// A model whose modified time is unknown (zero) must be protected when an age
+// filter is active — "age unknown" means protected, not infinitely old.
+func TestPrunePlanProtectsUnknownAgeUnderCutoff(t *testing.T) {
+	now := time.Now()
+	d := DiffResult{Untracked: []inventory.InstalledModel{
+		{Name: "unknown", Backend: inventory.BackendOllama, OllamaName: "unknown"}, // zero Modified
+		{Name: "old", Backend: inventory.BackendOllama, OllamaName: "old", Modified: now.Add(-30 * 24 * time.Hour)},
+	}}
+	plan := PrunePlan(d, PruneOptions{OlderThan: 7 * 24 * time.Hour}, now)
+	if len(plan) != 1 || plan[0].OllamaName != "old" {
+		t.Errorf("unknown-age model must be protected under an age cutoff: %+v", plan)
+	}
+}
+
+// Without an age filter, prune removes all untracked models by design —
+// including unknown-age ones. The zero-Modified protection is cutoff-scoped.
+func TestPrunePlanNoCutoffPrunesAll(t *testing.T) {
+	d := DiffResult{Untracked: []inventory.InstalledModel{
+		{Name: "unknown", Backend: inventory.BackendOllama, OllamaName: "unknown"}, // zero Modified
+		{Name: "dated", Backend: inventory.BackendOllama, OllamaName: "dated", Modified: time.Now()},
+	}}
+	plan := PrunePlan(d, PruneOptions{}, time.Now())
+	if len(plan) != 2 {
+		t.Errorf("no cutoff should prune all untracked: %+v", plan)
+	}
+}
+
+// A negative OlderThan (a bug that slipped past the CLI guard) must fail closed
+// and prune nothing, never resolve to a future cutoff that deletes everything.
+func TestPrunePlanNegativeCutoffFailsClosed(t *testing.T) {
+	now := time.Now()
+	d := DiffResult{Untracked: []inventory.InstalledModel{
+		{Name: "a", Backend: inventory.BackendOllama, OllamaName: "a", Modified: now.Add(-90 * 24 * time.Hour)},
+	}}
+	plan := PrunePlan(d, PruneOptions{OlderThan: -7 * 24 * time.Hour}, now)
+	if len(plan) != 0 {
+		t.Errorf("negative cutoff must prune nothing, got %+v", plan)
+	}
+}
+
 func TestSyncPlanFiltersBackend(t *testing.T) {
 	d := DiffResult{Missing: []ModelSpec{
 		{Backend: inventory.BackendOllama, Ollama: &tidymanifest.OllamaModelSpec{Name: "a"}},

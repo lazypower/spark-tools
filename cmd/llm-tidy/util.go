@@ -15,20 +15,33 @@ import (
 func formatSize(bytes int64) string { return progress.FormatSize(bytes) }
 
 // parseDuration extends time.ParseDuration with "d" for days, supporting
-// the "7d" / "30d" forms shown in spec §7.1.
+// the "7d" / "30d" forms shown in spec §7.1. An empty string means "no cutoff".
+// A non-empty value that resolves to a non-positive duration (e.g. "-7d", "0")
+// is rejected: --older-than gates deletion, and a non-positive cutoff would be
+// silently treated as "no age filter" downstream, pruning every untracked model.
 func parseDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, nil
 	}
+	var d time.Duration
 	if strings.HasSuffix(s, "d") {
 		days, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q", s)
 		}
-		return time.Duration(days) * 24 * time.Hour, nil
+		d = time.Duration(days) * 24 * time.Hour
+	} else {
+		var err error
+		d, err = time.ParseDuration(s)
+		if err != nil {
+			return 0, err
+		}
 	}
-	return time.ParseDuration(s)
+	if d <= 0 {
+		return 0, fmt.Errorf("duration %q must be positive", s)
+	}
+	return d, nil
 }
 
 // resolveBackend parses a --backend flag value or returns BackendUnknown
