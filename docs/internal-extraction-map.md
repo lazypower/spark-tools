@@ -436,7 +436,20 @@ well-tested packages; behavior preserved; pkg/* kept as alias wrappers.
 
 ## Extraction Status (live)
 
-Extracted to internal/ (with pkg/* compat wrappers, all green; each codex-passed):
+> **Compat wrappers removed (2026-07-07).** All 21 deprecated `pkg/*` alias
+> shims have been deleted and every consumer (cmd/*, the tool facades, seam
+> tests) now imports the `internal/*` authority directly — so each extracted
+> authority has a single import path. Package qualifiers were renamed to the
+> internal names (e.g. `api.`→`hub.`, `registry.`→`modelstore.`); two files that
+> also had a same-named struct field keep the field name (hfetch `Client.registry`,
+> llmrun `Engine.resolver`). What remains in `pkg/*`: the tool facades
+> (`hfetch`, `llmrun`, `llmserve`, `llmtidy`), the canonical `pkg/hfetch/auth`
+> leaf, and the still-host-bound packages (`pkg/llmrun/engine`,
+> `pkg/llmserve/{runtime,lifecycle,liveness}`, `pkg/llmtidy/interlock`) that are
+> NOT yet extracted. The two competing-authority collapses below remain open.
+
+Extracted to internal/ (formerly with pkg/* compat wrappers — now removed;
+each codex-passed):
 - Infra: `version`, `progress`, `tui`, `ui`, `paths` (mechanism), `tidymanifest`.
 - Pure-leaf domain: `modelmeta`, `fileset`, `gguf`.
 - State: `modelstore` (← pkg/hfetch/registry).
