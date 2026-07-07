@@ -13,7 +13,6 @@ import (
 	"github.com/lazypower/spark-tools/internal/reconcile"
 	"github.com/lazypower/spark-tools/internal/ui"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
 )
 
 func pruneCmd() *cobra.Command {
@@ -83,11 +82,13 @@ func runPrune(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, opts pruneOp
 		return nil
 	}
 
-	// Eviction interlock: never prune a model llm-serve reports in use (B3). The
-	// check shells out to `llm-serve liveness`; fail-closed if it's present but
+	// Eviction interlock: never prune a model llm-serve reports in use (B3). Gate
+	// through the Tidy's configured checker — the single authority — so a
+	// WithChecker override is honored instead of re-constructing the checker here.
+	// It shells out to `llm-serve liveness` by default; fail-closed if present but
 	// undeterminable, inactive if llm-serve isn't deployed here.
 	if !opts.noInterlock {
-		ilk := interlock.Apply(ctx, plan, interlock.LLMServeChecker(""))
+		ilk := tidy.EvictionInterlock(ctx, plan)
 		for _, warn := range ilk.Warnings {
 			fmt.Fprintf(w, "%s %s\n", styleHint.Render("⚠"), warn)
 		}

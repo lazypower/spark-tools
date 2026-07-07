@@ -88,6 +88,29 @@ func ollamaServer(models string) *httptest.Server {
 	}))
 }
 
+// The eviction interlock must gate through the Tidy's CONFIGURED checker
+// (WithChecker), not a hardcoded one — the CLI prune path previously
+// re-constructed its own LLMServeChecker and ignored any override, so a fake
+// checker (e.g. in a test or a consumer with no llm-serve) was bypassed.
+func TestEvictionInterlock_UsesConfiguredChecker(t *testing.T) {
+	var gotPaths []string
+	fake := func(_ context.Context, paths []string) (protected, warnings []string, err error) {
+		gotPaths = paths
+		return paths, nil, nil // protect everything the interlock asks about
+	}
+	tidy := &Tidy{checker: fake}
+
+	plan := []InstalledModel{{Name: "m", Backend: BackendGGUF, Path: "/models/m.gguf"}}
+	res := tidy.EvictionInterlock(context.Background(), plan)
+
+	if len(gotPaths) != 1 || gotPaths[0] != "/models/m.gguf" {
+		t.Errorf("configured checker must receive the plan's paths, got %v", gotPaths)
+	}
+	if len(res.Keep) != 0 {
+		t.Errorf("checker protected everything → nothing prunable, Keep=%v", res.Keep)
+	}
+}
+
 func TestSplitRepoQuant(t *testing.T) {
 	cases := []struct {
 		in              string

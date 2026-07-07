@@ -189,6 +189,20 @@ func (t *Tidy) Diff(ctx context.Context) (*DiffResult, error) {
 	return &d, nil
 }
 
+// InterlockResult re-exports the eviction-interlock outcome so callers can
+// render it without importing the interlock package directly.
+type InterlockResult = interlock.Result
+
+// EvictionInterlock applies the B3 eviction interlock to a prune plan using this
+// Tidy's configured liveness checker — the single authority for the gate. Both
+// the CLI prune flow and Tidy.Prune go through here, so a WithChecker override
+// is honored everywhere instead of being bypassed by a re-constructed checker.
+// Protected (in-use) models are dropped from Result.Keep; it fails closed when
+// liveness cannot be determined, and reports Inactive when llm-serve is absent.
+func (t *Tidy) EvictionInterlock(ctx context.Context, plan []InstalledModel) InterlockResult {
+	return interlock.Apply(ctx, plan, t.checker)
+}
+
 // Prune removes untracked models. When filter is non-nil it is called for
 // each candidate; returning true removes the candidate. Returns the
 // removed models, total bytes reclaimed, and any per-model errors joined.
@@ -214,10 +228,10 @@ func (t *Tidy) Prune(
 		}
 		plan = filtered
 	}
-	// Eviction interlock (B3): the gate lives HERE, at the deletion authority, so
-	// EVERY library prune is protected — not just the CLI. Protected (in-use)
-	// models are dropped from the plan; fail-closed if liveness can't be reached.
-	plan = interlock.Apply(ctx, plan, t.checker).Keep
+	// Eviction interlock (B3): the gate lives at the deletion authority, so EVERY
+	// library prune is protected — not just the CLI. Protected (in-use) models
+	// are dropped from the plan; fail-closed if liveness can't be reached.
+	plan = t.EvictionInterlock(ctx, plan).Keep
 	return reconcile.Prune(ctx, t.provider, plan, nil)
 }
 
