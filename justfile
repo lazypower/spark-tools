@@ -14,7 +14,7 @@ default:
     @just --list
 
 # Build all binaries to ~/.local/bin
-build: build-hfetch build-llm-run build-llm-bench build-llm-chat build-llm-tidy
+build: build-hfetch build-llm-run build-llm-serve build-llm-chat build-llm-bench build-llm-tidy
 
 # Build hfetch
 build-hfetch:
@@ -23,6 +23,10 @@ build-hfetch:
 # Build llm-run
 build-llm-run:
     {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-run ./cmd/llm-run
+
+# Build llm-serve
+build-llm-serve:
+    {{go}} build -ldflags '{{ldflags}}' -o {{bin}}/llm-serve ./cmd/llm-serve
 
 # Build llm-bench
 build-llm-bench:
@@ -41,6 +45,7 @@ build-linux-arm64:
     mkdir -p {{dist-arm64}}
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/hfetch ./cmd/hfetch
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-run ./cmd/llm-run
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-serve ./cmd/llm-serve
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-bench ./cmd/llm-bench
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-chat ./cmd/llm-chat
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-arm64}}/llm-tidy ./cmd/llm-tidy
@@ -51,6 +56,7 @@ build-linux-amd64:
     mkdir -p {{dist-amd64}}
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/hfetch ./cmd/hfetch
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-run ./cmd/llm-run
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-serve ./cmd/llm-serve
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-bench ./cmd/llm-bench
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-chat ./cmd/llm-chat
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 {{go}} build -ldflags '{{ldflags}}' -o {{dist-amd64}}/llm-tidy ./cmd/llm-tidy
@@ -77,7 +83,7 @@ check: vet test build
 
 # Clean built binaries
 clean:
-    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-bench {{bin}}/llm-chat {{bin}}/llm-tidy
+    rm -f {{bin}}/hfetch {{bin}}/llm-run {{bin}}/llm-serve {{bin}}/llm-bench {{bin}}/llm-chat {{bin}}/llm-tidy
     rm -rf dist/
 
 # Install (alias for build)

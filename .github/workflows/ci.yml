@@ -26,5 +26,7 @@ jobs:
         run: |
           go build ./cmd/hfetch
           go build ./cmd/llm-run
-          go build ./cmd/llm-bench
+          go build ./cmd/llm-serve
           go build ./cmd/llm-chat
+          go build ./cmd/llm-bench
+          go build ./cmd/llm-tidy
