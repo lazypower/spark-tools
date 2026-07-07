@@ -1,6 +1,7 @@
 package suite
 
 import (
+	"context"
 	"testing"
 )
 
@@ -41,8 +42,23 @@ func TestNewRunner_Defaults(t *testing.T) {
 func TestRun_RequiresEngine(t *testing.T) {
 	s := testSuite()
 	runner := NewRunner()
-	_, err := runner.Run(nil, s)
+	_, err := runner.Run(context.Background(), s)
 	if err == nil {
 		t.Error("expected error without engine")
+	}
+}
+
+// --continue-from must be validated: a job ID that matches nothing has to be
+// rejected, not silently treated as "skip every job".
+func TestContinueFromMatches(t *testing.T) {
+	jobs := ExpandJobs(testSuite())
+	if len(jobs) == 0 {
+		t.Fatal("expected jobs to validate against")
+	}
+	if !continueFromMatches(jobs, jobs[0].JobID) {
+		t.Errorf("an existing job ID must match")
+	}
+	if continueFromMatches(jobs, "no-such-job-id") {
+		t.Errorf("a non-existent job ID must not match (it would skip the whole suite)")
 	}
 }

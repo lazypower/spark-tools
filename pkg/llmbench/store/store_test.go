@@ -81,6 +81,39 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// An interrupted (partial) run must still be persisted and listable, so the
+// jobs that completed before Ctrl-C are not lost to results list/compare.
+func TestSaveRun_InterruptedIsPersistedAndListed(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	result := testRunResult()
+	result.Interrupted = true
+
+	if err := s.SaveRun(result); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	loaded, err := s.Load(result.RunID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.Interrupted {
+		t.Error("the interrupted flag must persist across save/load")
+	}
+	summaries, err := s.List(StoreFilter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	found := false
+	for _, sum := range summaries {
+		if sum.RunID == result.RunID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an interrupted run must appear in results list")
+	}
+}
+
 func TestSaveJob_Incremental(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(dir)

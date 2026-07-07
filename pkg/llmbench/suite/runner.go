@@ -106,6 +106,12 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 		return nil, fmt.Errorf("no jobs to run after filtering")
 	}
 
+	// Validate --continue-from up front: an ID that matches no job would
+	// otherwise silently skip every job and report an all-skipped run.
+	if r.cfg.continueFrom != "" && !continueFromMatches(jobs, r.cfg.continueFrom) {
+		return nil, fmt.Errorf("--continue-from job ID %q not found in the suite (%d jobs)", r.cfg.continueFrom, len(jobs))
+	}
+
 	// Pre-flight checks
 	if !r.cfg.skipCheck {
 		dirtyMode := r.cfg.dirtyMode
@@ -153,7 +159,13 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 	for i, js := range jobs {
 		select {
 		case <-ctx.Done():
+			// Finalize the partial run so the jobs that did complete are visible
+			// to results list/compare instead of being lost on Ctrl-C.
+			result.Interrupted = true
 			result.CompletedAt = time.Now()
+			if r.cfg.store != nil {
+				r.cfg.store.SaveRun(result)
+			}
 			return result, ctx.Err()
 		default:
 		}
@@ -236,12 +248,27 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 
 	result.CompletedAt = time.Now()
 
-	// Save complete results
+	// Save complete results. Surface a save failure (e.g. a full disk) rather
+	// than reporting success on a run that was never persisted.
 	if r.cfg.store != nil {
-		r.cfg.store.SaveRun(result)
+		if err := r.cfg.store.SaveRun(result); err != nil {
+			return result, fmt.Errorf("saving run results: %w", err)
+		}
 	}
 
 	return result, nil
+}
+
+// continueFromMatches reports whether jobID names a job in the expanded set.
+// A --continue-from that matches nothing must be rejected, not treated as
+// "skip everything".
+func continueFromMatches(jobs []JobSpec, jobID string) bool {
+	for _, js := range jobs {
+		if js.JobID == jobID {
+			return true
+		}
+	}
+	return false
 }
 
 // DryRun expands the job matrix and returns the job specs without executing.

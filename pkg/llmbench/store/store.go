@@ -34,8 +34,12 @@ type RunResult struct {
 	PreflightWarnings []string         `json:"preflight_warnings"`
 	StartedAt        time.Time         `json:"started_at"`
 	CompletedAt      time.Time         `json:"completed_at"`
+	// Interrupted is set when the run was cut short (e.g. Ctrl-C) and only some
+	// jobs completed; the run is still persisted so its partial results are
+	// visible to results list/compare.
+	Interrupted      bool                `json:"interrupted,omitempty"`
 	Hardware         llmrun.HardwareInfo `json:"hardware"`
-	Jobs             []job.JobResult   `json:"jobs"`
+	Jobs             []job.JobResult     `json:"jobs"`
 }
 
 // GenerateRunID creates a run ID in the format run-YYYYMMDD-HHMMSS.
