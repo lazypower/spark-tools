@@ -39,10 +39,17 @@ type chatModel struct {
 	history  []string // command history
 
 	// State
-	streaming    bool
-	streamBuf    strings.Builder
-	err          error
-	quitting     bool
+	streaming bool
+	streamBuf strings.Builder
+	err       error
+	quitting  bool
+
+	// notice is display-only UI feedback (stats, context, /temp and /save
+	// confirmations). It is rendered in the view but NEVER sent to the model —
+	// unlike conversation messages. Cleared on the next submitted action.
+	notice string
+	// temperature applies to requests once set by /temp (nil = server default).
+	temperature *float64
 
 	// Stats — updated from server-reported Usage after each response.
 	promptTokens int // cumulative prompt tokens (latest server report)
@@ -168,10 +175,7 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.messages = append(m.messages, api.Message{
-				Role:    "system",
-				Content: fmt.Sprintf("Conversation saved to %s", msg.path),
-			})
+			m.notice = fmt.Sprintf("Conversation saved to %s", msg.path)
 		}
 		return m, nil
 	}
@@ -236,12 +240,18 @@ func (m *chatModel) View() string {
 		b.WriteString("\n\n")
 	}
 
-	// Error
+	// Notice — display-only UI feedback, never part of the model conversation.
+	if m.notice != "" {
+		b.WriteString(m.notice)
+		b.WriteString("\n\n")
+	}
+
+	// Error. Not cleared here — a re-render (e.g. a resize) must not eat an
+	// unseen error; it is cleared on the next submitted action.
 	if m.err != nil {
 		b.WriteString(fmt.Sprintf("  %s %s\n\n",
 			errorStyle.Render("Error:"),
 			m.err.Error()))
-		m.err = nil
 	}
 
 	// Input prompt
@@ -266,6 +276,11 @@ func (m *chatModel) handleSubmit() (tea.Model, tea.Cmd) {
 	if input == "" {
 		return m, nil
 	}
+
+	// A new submitted action clears the previous transient feedback (so it is
+	// not cleared merely by a re-render, e.g. a window resize).
+	m.notice = ""
+	m.err = nil
 
 	// Handle slash commands.
 	if strings.HasPrefix(input, "/") {
@@ -314,21 +329,16 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			speed = float64(m.genTokens) / m.lastGenDur.Seconds()
 		}
 		ctxUsed := m.promptTokens + m.genTokens
-		stats := RenderSessionStats(m.promptTokens, m.genTokens, ctxUsed, m.cfg.ContextSize, speed)
-		m.messages = append(m.messages, api.Message{
-			Role:    "system",
-			Content: stats,
-		})
+		m.notice = RenderSessionStats(m.promptTokens, m.genTokens, ctxUsed, m.cfg.ContextSize, speed)
 		return m, nil
 
 	case "/context":
 		ctxUsed := m.promptTokens + m.genTokens
-		pct := float64(ctxUsed) / float64(m.cfg.ContextSize) * 100
-		msg := fmt.Sprintf("Context: %d / %d tokens (%.1f%%)", ctxUsed, m.cfg.ContextSize, pct)
-		m.messages = append(m.messages, api.Message{
-			Role:    "system",
-			Content: msg,
-		})
+		pct := 0.0
+		if m.cfg.ContextSize > 0 {
+			pct = float64(ctxUsed) / float64(m.cfg.ContextSize) * 100
+		}
+		m.notice = fmt.Sprintf("Context: %d / %d tokens (%.1f%%)", ctxUsed, m.cfg.ContextSize, pct)
 		return m, nil
 
 	case "/system":
@@ -357,10 +367,9 @@ func (m *chatModel) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("temperature must be between 0 and 2")
 			return m, nil
 		}
-		m.messages = append(m.messages, api.Message{
-			Role:    "system",
-			Content: fmt.Sprintf("Temperature set to %.2f", val),
-		})
+		v := val
+		m.temperature = &v
+		m.notice = fmt.Sprintf("Temperature set to %.2f (applies to new messages)", val)
 		return m, nil
 
 	case "/save":
@@ -448,9 +457,10 @@ func checkBoundary(accumulated string) (clean string, hit bool) {
 func (m *chatModel) streamResponse() tea.Cmd {
 	return func() tea.Msg {
 		req := api.ChatCompletionRequest{
-			Model:    m.cfg.ModelName,
-			Messages: m.messages,
-			Stop:     chatStopSequences,
+			Model:       m.cfg.ModelName,
+			Messages:    m.messages,
+			Stop:        chatStopSequences,
+			Temperature: m.temperature,
 		}
 
 		// Track accumulated raw content for boundary detection.

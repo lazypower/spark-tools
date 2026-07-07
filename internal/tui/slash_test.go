@@ -76,6 +76,9 @@ func TestSlash_TempValidation(t *testing.T) {
 	if m.err != nil {
 		t.Errorf("/temp 0.7 must be accepted, got %v", m.err)
 	}
+	if m.temperature == nil || *m.temperature != 0.7 {
+		t.Errorf("/temp 0.7 must actually set the temperature, got %v", m.temperature)
+	}
 }
 
 func TestSlash_UnknownCommand(t *testing.T) {
@@ -99,10 +102,47 @@ func TestSlash_QuitSetsQuitting(t *testing.T) {
 func TestSlash_ContextReportsUsage(t *testing.T) {
 	m := newModel()
 	m.promptTokens, m.genTokens = 1024, 1024 // 2048 / 4096 = 50%
+	before := len(m.messages)
 	m.handleSlashCommand("/context")
-	last := m.messages[len(m.messages)-1]
-	if !strings.Contains(last.Content, "2048 / 4096") || !strings.Contains(last.Content, "50.0%") {
-		t.Errorf("/context must report usage math, got %q", last.Content)
+	if len(m.messages) != before {
+		t.Errorf("/context must not append to the model conversation")
+	}
+	if !strings.Contains(m.notice, "2048 / 4096") || !strings.Contains(m.notice, "50.0%") {
+		t.Errorf("/context must report usage math in the notice, got %q", m.notice)
+	}
+}
+
+// Regression for transcript pollution: /stats, /context, and /temp feedback
+// must be display-only notices, never appended to the conversation that is sent
+// to the model on every turn (a /stats box carried ANSI escapes into the chat).
+func TestSlash_FeedbackDoesNotPolluteConversation(t *testing.T) {
+	m := newModel(
+		api.Message{Role: "system", Content: "sys"},
+		api.Message{Role: "user", Content: "hi"},
+	)
+	before := len(m.messages)
+	for _, c := range []string{"/stats", "/context", "/temp 0.5"} {
+		m.handleSlashCommand(c)
+	}
+	if len(m.messages) != before {
+		t.Fatalf("slash feedback must not enter the model conversation: %d -> %d\n%+v",
+			before, len(m.messages), m.messages)
+	}
+	if m.notice == "" {
+		t.Error("the last slash command should have set a display notice")
+	}
+}
+
+// The /save success confirmation is UI feedback, not a conversation turn.
+func TestSaveResult_SetsNoticeNotMessage(t *testing.T) {
+	m := newModel(api.Message{Role: "user", Content: "hi"})
+	before := len(m.messages)
+	m.Update(saveResultMsg{path: "/tmp/convo.txt"})
+	if len(m.messages) != before {
+		t.Error("save confirmation must not enter the model conversation")
+	}
+	if !strings.Contains(m.notice, "/tmp/convo.txt") {
+		t.Errorf("save confirmation should be a display notice, got %q", m.notice)
 	}
 }
 
