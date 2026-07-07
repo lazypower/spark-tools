@@ -112,6 +112,36 @@ func Verify(repoFiles []hub.ModelFile, localDir string) (*Report, error) {
 	return rep, nil
 }
 
+// FileRef names a single downloaded file to verify: its repo-relative Filename
+// (to match the upstream listing) and the on-disk LocalPath it landed at.
+type FileRef struct {
+	Filename  string
+	LocalPath string
+}
+
+// VerifyFiles verifies exactly the given files against upstream — each must be
+// present at its LocalPath and content-match the repo listing (SHA256 for LFS,
+// git-blob SHA1 otherwise). Unlike Verify it makes NO completeness assertions
+// about the fileset, so it is the right check for a GGUF download (one or more
+// quant shards selected out of a repo that also ships other quants) where the
+// safetensors gate does not apply. A file whose basename is absent from the
+// repo listing is a hard failure.
+func VerifyFiles(repoFiles []hub.ModelFile, files []FileRef) *Report {
+	rep := &Report{}
+	repoByBase := make(map[string]hub.ModelFile, len(repoFiles))
+	for _, f := range repoFiles {
+		if f.Type == "directory" {
+			continue
+		}
+		repoByBase[path.Base(f.Filename)] = f
+	}
+	for _, fr := range files {
+		f, inRepo := repoByBase[path.Base(fr.Filename)]
+		verifyFile(rep, f, inRepo, fr.LocalPath, fr.Filename)
+	}
+	return rep
+}
+
 // verifyWeights resolves the required weight set and verifies each shard.
 //
 //	index present      → required = weight_map values ∪ all *.safetensors

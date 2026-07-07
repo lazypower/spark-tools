@@ -22,13 +22,21 @@ const (
 
 // Completeness types (aliases).
 type (
-	Issue  = ifs.Issue
-	Report = ifs.Report
+	Issue   = ifs.Issue
+	Report  = ifs.Report
+	FileRef = ifs.FileRef
 )
 
 // Verify runs the serve-ready completeness gate. Delegates to internal/fileset.
 func Verify(repoFiles []api.ModelFile, localDir string) (*Report, error) {
 	return ifs.Verify(repoFiles, localDir)
+}
+
+// VerifyFiles verifies exactly the given files against upstream hashes without
+// running the completeness gate — used to verify a GGUF download. Delegates to
+// internal/fileset.
+func VerifyFiles(repoFiles []api.ModelFile, files []FileRef) *Report {
+	return ifs.VerifyFiles(repoFiles, files)
 }
 
 // SelectVLLM returns the complete serve-ready safetensors fileset.

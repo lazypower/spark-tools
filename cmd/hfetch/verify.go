@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -55,11 +57,7 @@ func verifyCmd() *cobra.Command {
 
 			failed := 0
 			for _, id := range targets {
-				localDir := output
-				if localDir == "" {
-					localDir = reg.ModelDir(id)
-				}
-				if err := verifyOne(cmd.Context(), client, id, localDir); err != nil {
+				if err := verifyOne(cmd.Context(), client, reg, id, output); err != nil {
 					failed++
 				}
 			}
@@ -77,17 +75,16 @@ func verifyCmd() *cobra.Command {
 	return cmd
 }
 
-// verifyOne runs the completeness gate for one model against canonical upstream
-// hashes. It prints a per-model result and returns an error iff the model is
-// not serve-ready, so the caller can tally failures across an --all sweep.
-func verifyOne(ctx context.Context, client *api.Client, modelID, localDir string) error {
+// verifyOne re-verifies one downloaded model against canonical upstream hashes.
+// It verifies what the registry records as downloaded, at each file's recorded
+// LocalPath: GGUF quant shards are re-hashed directly (the safetensors gate does
+// not apply to them), while a safetensors/vLLM fileset — or a model not tracked
+// in the registry — goes through the completeness gate. It prints a per-model
+// result and returns an error iff the model is not serve-ready, so the caller
+// can tally failures across an --all sweep.
+func verifyOne(ctx context.Context, client *api.Client, reg *registry.Registry, modelID, output string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	fmt.Printf("\n  %s %s\n", headerStyle.Render("Verifying"), modelID)
-
-	if _, err := os.Stat(localDir); err != nil {
-		fmt.Printf("  ✗ not downloaded (%s)\n", localDir)
-		return fmt.Errorf("%s: not downloaded", modelID)
-	}
 
 	repoFiles, err := client.ListFiles(ctx, modelID)
 	if err != nil {
@@ -95,11 +92,83 @@ func verifyOne(ctx context.Context, client *api.Client, modelID, localDir string
 		return err
 	}
 
-	rep, err := fileset.Verify(repoFiles, localDir)
-	if err != nil {
-		fmt.Printf("  ✗ %v\n", err)
-		return err
+	// Partition what the registry recorded: GGUF quant shards are re-hashed
+	// against upstream directly; everything else is a safetensors/vLLM fileset
+	// verified by the completeness gate.
+	lm := reg.Get(modelID)
+	var ggufRefs []fileset.FileRef
+	nonGGUF := 0
+	if lm != nil {
+		for _, f := range lm.Files {
+			if !f.Complete {
+				continue
+			}
+			if strings.HasSuffix(strings.ToLower(f.Filename), ".gguf") {
+				ggufRefs = append(ggufRefs, fileset.FileRef{
+					Filename:  f.Filename,
+					LocalPath: ggufLocalPath(f, output),
+				})
+			} else {
+				nonGGUF++
+			}
+		}
 	}
+
+	failed := false
+
+	// GGUF: re-hash the recorded quant shards against upstream (no gate).
+	if len(ggufRefs) > 0 {
+		rep := fileset.VerifyFiles(repoFiles, ggufRefs)
+		if !printVerifyReport(rep, fmt.Sprintf("%d GGUF file(s) present and hash-matched", len(ggufRefs))) {
+			failed = true
+		}
+	}
+
+	// Safetensors/vLLM fileset, or a model not tracked in the registry (fall
+	// back to the directory gate). Skipped for a GGUF-only model.
+	if nonGGUF > 0 || lm == nil {
+		localDir := output
+		if localDir == "" {
+			localDir = reg.ModelDir(modelID)
+		}
+		if _, statErr := os.Stat(localDir); statErr != nil {
+			if len(ggufRefs) == 0 {
+				fmt.Printf("  ✗ not downloaded (%s)\n", localDir)
+				return fmt.Errorf("%s: not downloaded", modelID)
+			}
+		} else {
+			rep, err := fileset.Verify(repoFiles, localDir)
+			if err != nil {
+				fmt.Printf("  ✗ %v\n", err)
+				return err
+			}
+			if !printVerifyReport(rep, "all required files present and hash-matched") {
+				failed = true
+			}
+		}
+	}
+
+	if failed {
+		return fmt.Errorf("%s: verification failed", modelID)
+	}
+	return nil
+}
+
+// ggufLocalPath resolves where a recorded GGUF file lives: its registry
+// LocalPath normally, or under the --output override directory when set.
+func ggufLocalPath(f registry.LocalFile, output string) string {
+	if output != "" {
+		return filepath.Join(output, filepath.Base(f.Filename))
+	}
+	if f.LocalPath != "" {
+		return f.LocalPath
+	}
+	return f.Filename
+}
+
+// printVerifyReport renders a completeness report's warnings and failures and
+// returns whether it passed (no hard failures).
+func printVerifyReport(rep *fileset.Report, okMsg string) bool {
 	for _, w := range rep.Warnings {
 		fmt.Printf("  ⚠ %s\n", w)
 	}
@@ -107,8 +176,8 @@ func verifyOne(ctx context.Context, client *api.Client, modelID, localDir string
 		for _, f := range rep.HardFail {
 			fmt.Printf("  ✗ %s\n", f)
 		}
-		return fmt.Errorf("%s: incomplete (%d issue(s))", modelID, len(rep.HardFail))
+		return false
 	}
-	fmt.Printf("  ✓ OK — all required files present and hash-matched\n")
-	return nil
+	fmt.Printf("  ✓ %s\n", okMsg)
+	return true
 }
