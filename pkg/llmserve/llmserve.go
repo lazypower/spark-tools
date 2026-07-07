@@ -4,9 +4,10 @@
 // drivers) so a consumer imports one package to turn a request + a verified
 // artifact into a host-appropriate launch spec.
 //
-// v1 is emit-only (design §6): it resolves and emits, and owns nothing at
-// runtime. Launch, supervision, registration, and the llm-tidy interlock are v2
-// (B) — foreclosed here by construction.
+// Beyond resolving and emitting a spec, it now also composes the B1 lifecycle
+// (NewOrchestrator over the real Docker Compose runtime) so callers can bring an
+// instance up, take it down, and query its status; the llm-tidy eviction
+// interlock is exposed for the tidy side to consult.
 package llmserve
 
 import (
@@ -66,8 +67,7 @@ type EmitResult struct {
 // Emit resolves a request against the supplied verified artifact facts and
 // renders it for the given target and host. It is the one-call path: the caller
 // is responsible for having obtained facts from a VERIFIED artifact (see
-// DetectFacts / VerifyArtifact), since emit-only v1 trusts the artifact gate
-// upstream.
+// DetectFacts / VerifyArtifact), since Emit trusts the artifact gate upstream.
 func Emit(req contract.Request, facts serving.ArtifactFacts, target emit.Target, host emit.Host) (*EmitResult, error) {
 	resolved, err := contract.Resolve(req, facts)
 	if err != nil {

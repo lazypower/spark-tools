@@ -1,6 +1,7 @@
 // Command llm-serve is the vLLM contract engine: it resolves a serve request
-// into a validated vLLM launch spec and emits it. v1 is emit-only — it does not
-// launch, supervise, or own anything at runtime (that is v2).
+// into a validated vLLM launch spec, and can either emit that spec for you to
+// run (emit/profiles/targets) or bring the instance up and down itself over
+// Docker Compose (up/down/status/recover/liveness).
 package main
 
 import (
@@ -23,7 +24,7 @@ func rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "llm-serve",
 		Short:         "vLLM contract engine — resolve a serve request to a validated launch spec",
-		Long:          "llm-serve — turn {model + capabilities + ctx + hardware} into a validated, host-appropriate vLLM launch spec, rejecting footgun flag combinations. Emit-only: it prints the spec for you (or compose/quadlet) to run.",
+		Long:          "llm-serve — turn {model + capabilities + ctx + hardware} into a validated, host-appropriate vLLM launch spec, rejecting footgun flag combinations. Emit the spec for you (or compose/quadlet) to run, or bring the instance up and down directly with up/down/status/recover.",
 		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
