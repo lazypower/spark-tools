@@ -13,9 +13,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lazypower/spark-tools/internal/download"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/download"
 	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/hfetch/source"
