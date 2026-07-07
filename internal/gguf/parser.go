@@ -107,6 +107,10 @@ func applyMetadata(meta *GGUFMetadata, key string, value any) {
 		meta.HeadCount = asInt(value)
 	case "attention.head_count_kv":
 		meta.KVHeadCount = asInt(value)
+	case "attention.key_length":
+		meta.KeyLength = asInt(value)
+	case "attention.value_length":
+		meta.ValueLength = asInt(value)
 	case "embedding_length":
 		meta.EmbeddingSize = asInt(value)
 	case "vocab_size":

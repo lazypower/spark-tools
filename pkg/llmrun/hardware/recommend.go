@@ -98,19 +98,44 @@ func estimateMaxContext(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 		availableGB = 0
 	}
 
-	// KV cache bytes per token = 2 (K+V) * layers * kv_dim * 2 bytes (FP16).
+	// KV cache bytes per token = layers * kv_heads * (key_dim + value_dim) * 2
+	// bytes (FP16 for K and V).
 	//
-	// kv_dim accounts for Grouped-Query Attention: modern models share K/V
-	// across query-head groups, so the KV cache scales with the KV-head count,
-	// not the full embedding width — using the full width overestimates the KV
-	// cache by the GQA ratio (often 4-8x), which would understate the context
-	// the hardware can actually hold. Without a KV-head count (older metadata),
-	// fall back to the full embedding size (a conservative overestimate).
-	kvDim := float64(meta.EmbeddingSize)
-	if meta.HeadCount > 0 && meta.KVHeadCount > 0 && meta.KVHeadCount < meta.HeadCount {
-		kvDim = float64(meta.EmbeddingSize) * float64(meta.KVHeadCount) / float64(meta.HeadCount)
+	//   - kv_heads captures Grouped-Query Attention: modern models share K/V
+	//     across query-head groups, so the cache scales with the KV-head count,
+	//     not the query-head count. Using the full width overestimates the KV
+	//     cache by the GQA ratio (often 4-8x) and understates the usable context.
+	//   - key_dim/value_dim are the model's explicit per-head dimensions when
+	//     present (they can exceed embedding/head_count, e.g. asymmetric or
+	//     MLA-style attention); using them avoids UNDER-estimating the cache and
+	//     over-recommending context past what fits.
+	//
+	// When head geometry is unavailable, fall back to the full embedding width
+	// for both K and V — a conservative overestimate.
+	kvHeads := meta.HeadCount
+	if meta.KVHeadCount > 0 {
+		kvHeads = meta.KVHeadCount
 	}
-	kvBytesPerToken := float64(2) * float64(meta.LayerCount) * kvDim * 2.0
+	headDim := 0
+	if meta.HeadCount > 0 {
+		headDim = meta.EmbeddingSize / meta.HeadCount
+	}
+	keyDim := headDim
+	if meta.KeyLength > 0 {
+		keyDim = meta.KeyLength
+	}
+	valueDim := headDim
+	if meta.ValueLength > 0 {
+		valueDim = meta.ValueLength
+	}
+
+	var kvBytesPerToken float64
+	if kvHeads > 0 && keyDim > 0 && valueDim > 0 {
+		kvBytesPerToken = float64(meta.LayerCount) * float64(kvHeads) * float64(keyDim+valueDim) * 2.0
+	} else {
+		// No usable head geometry: full embedding width for both K and V.
+		kvBytesPerToken = 2.0 * float64(meta.LayerCount) * float64(meta.EmbeddingSize) * 2.0
+	}
 
 	if kvBytesPerToken <= 0 {
 		return defaultContext
@@ -121,14 +146,19 @@ func estimateMaxContext(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 
 	maxTokens := int(availableBytes / kvBytesPerToken)
 
-	// Cap at model's trained context length if known.
+	// Cap at the model's trained context length if known.
 	if meta.ContextLength > 0 && maxTokens > meta.ContextLength {
 		maxTokens = meta.ContextLength
 	}
 
-	// Enforce minimum.
+	// Enforce a practical minimum, but never raise past the trained window — a
+	// model trained on fewer than minContext tokens must not be recommended more
+	// than it was trained for.
 	if maxTokens < minContext {
 		maxTokens = minContext
+		if meta.ContextLength > 0 && maxTokens > meta.ContextLength {
+			maxTokens = meta.ContextLength
+		}
 	}
 
 	// Round down to nearest power-of-2-friendly number for llama.cpp.

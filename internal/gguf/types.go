@@ -33,6 +33,8 @@ type GGUFMetadata struct {
 	FileType       int            `json:"file_type"`
 	HeadCount      int            `json:"head_count"`
 	KVHeadCount    int            `json:"kv_head_count"` // attention.head_count_kv; < HeadCount under GQA
+	KeyLength      int            `json:"key_length"`    // attention.key_length; explicit per-head K dim
+	ValueLength    int            `json:"value_length"`  // attention.value_length; explicit per-head V dim
 	LayerCount     int            `json:"layer_count"`
 	EmbeddingSize  int            `json:"embedding_size"`
 	VocabSize      int            `json:"vocab_size"`

@@ -273,6 +273,50 @@ func TestEstimateMaxContext_GQAExtendsContext(t *testing.T) {
 	}
 }
 
+// Explicit per-head key/value lengths larger than embedding/head_count must
+// increase the KV-cache estimate (and shrink the recommended context), not be
+// ignored — otherwise the cache is under-estimated and context is over-
+// recommended past what fits (OOM risk).
+func TestEstimateMaxContext_ExplicitHeadDims(t *testing.T) {
+	hw := &HardwareInfo{TotalMemoryGB: 32}
+	base := gguf.GGUFMetadata{
+		ParameterCount: 32_000_000_000,
+		ContextLength:  131072, // large so memory is the binding constraint
+		QuantType:      "Q4_K_M",
+		LayerCount:     64,
+		EmbeddingSize:  5120,
+		HeadCount:      40, // implicit head dim = 128
+	}
+	implicit := base
+	explicit := base
+	explicit.KeyLength = 256 // double the implicit 128
+	explicit.ValueLength = 256
+
+	ctxImplicit := estimateMaxContext(hw, &implicit)
+	ctxExplicit := estimateMaxContext(hw, &explicit)
+	if ctxExplicit >= ctxImplicit {
+		t.Errorf("larger explicit head dims must shrink context: implicit=%d explicit=%d", ctxImplicit, ctxExplicit)
+	}
+}
+
+// The minimum-context floor must never raise the recommendation past the
+// model's trained window: a model that doesn't fit (or barely fits) still can't
+// be run beyond what it was trained for.
+func TestEstimateMaxContext_FloorNeverExceedsTrainedWindow(t *testing.T) {
+	hw := &HardwareInfo{TotalMemoryGB: 8}
+	meta := &gguf.GGUFMetadata{
+		ParameterCount: 70_000_000_000, // does not fit in 8GB → available ~0 → maxTokens 0
+		ContextLength:  256,            // trained smaller than the 512 floor
+		QuantType:      "Q4_K_M",
+		LayerCount:     80,
+		EmbeddingSize:  8192,
+		HeadCount:      64,
+	}
+	if got := estimateMaxContext(hw, meta); got > 256 {
+		t.Errorf("floor must not exceed the 256-token trained window, got %d", got)
+	}
+}
+
 func TestRecommendBatchSize(t *testing.T) {
 	tests := []struct {
 		name  string
