@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,19 @@ import (
 
 // formatSize delegates to the shared formatter used elsewhere in spark-tools.
 func formatSize(bytes int64) string { return progress.FormatSize(bytes) }
+
+// tolerateInventory turns a partial-inventory error (a backend was unreachable,
+// e.g. no Ollama daemon on a GGUF-only box) into a warning and proceeds, per
+// spec §5.3 skip-with-warning. Any other error is fatal and returned unchanged.
+// The DiffResult from Diff remains valid over the backends that did respond.
+func tolerateInventory(w io.Writer, err error) error {
+	var partial *llmtidy.PartialInventoryError
+	if errors.As(err, &partial) {
+		fmt.Fprintf(w, "%s %s\n", styleHint.Render("⚠ backend unavailable:"), partial.Error())
+		return nil
+	}
+	return err
+}
 
 // parseDuration extends time.ParseDuration with "d" for days, supporting
 // the "7d" / "30d" forms shown in spec §7.1. An empty string means "no cutoff".

@@ -365,6 +365,32 @@ func TestRunSync_BackendFilterConstrainsPulls(t *testing.T) {
 	}
 }
 
+// An unreachable Ollama daemon must warn and proceed, not hard-fail the whole
+// command. Regression for prune/sync being unusable on a GGUF-only box.
+func TestRunSync_ToleratesUnreachableBackend(t *testing.T) {
+	t.Setenv("HFETCH_DATA_DIR", t.TempDir())
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close() // now refuses connections
+
+	mpath := filepath.Join(t.TempDir(), "manifest.yaml")
+	if err := os.WriteFile(mpath, []byte("version: 1\ngguf: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tidy, err := llmtidy.New(llmtidy.WithManifestPath(mpath), llmtidy.WithOllamaHost(deadURL))
+	if err != nil {
+		t.Fatalf("build tidy: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runSync(context.Background(), &buf, tidy, inventory.BackendUnknown, false); err != nil {
+		t.Fatalf("sync must tolerate an unreachable backend, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "backend unavailable") {
+		t.Errorf("expected an unavailable-backend warning, got:\n%s", buf.String())
+	}
+}
+
 func TestRunStatus_MissingManifestGuidance(t *testing.T) {
 	// No manifest file written → guidance to run init, no crash.
 	tidy := hermeticTidy(t, "")

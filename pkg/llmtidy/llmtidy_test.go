@@ -2,6 +2,7 @@ package llmtidy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,46 @@ import (
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
 )
+
+// deadOllamaURL returns the URL of an Ollama server that has been shut down, so
+// any request to it fails to connect — the GGUF-only-box scenario.
+func deadOllamaURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+	return url
+}
+
+// An unreachable backend must not be fatal: Diff returns a usable partial diff
+// wrapped in *PartialInventoryError so callers can skip-with-warning.
+func TestDiffToleratesUnreachableBackend(t *testing.T) {
+	tidy, _ := newTestTidy(t, deadOllamaURL(t))
+	if err := tidy.SaveManifest(&Manifest{Version: manifest.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := tidy.Diff(context.Background())
+	if d == nil {
+		t.Fatal("Diff must return a usable partial diff when a backend is unreachable")
+	}
+	var partial *PartialInventoryError
+	if !errors.As(err, &partial) {
+		t.Fatalf("unreachable backend must surface as *PartialInventoryError, got %v", err)
+	}
+}
+
+// Prune previously returned the connection error and was unusable on a
+// GGUF-only box; it must now tolerate the unreachable backend and prune only
+// what the reachable backends reported (here, nothing).
+func TestPruneToleratesUnreachableBackend(t *testing.T) {
+	tidy, _ := newTestTidy(t, deadOllamaURL(t))
+	if err := tidy.SaveManifest(&Manifest{Version: manifest.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tidy.Prune(context.Background(), nil); err != nil {
+		t.Fatalf("prune must tolerate an unreachable backend, got %v", err)
+	}
+}
 
 // newTestTidy builds a Tidy that talks to the given httptest server for
 // Ollama and uses a temp dir for both the manifest and the hfetch registry.

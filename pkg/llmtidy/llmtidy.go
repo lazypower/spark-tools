@@ -40,6 +40,17 @@ const (
 // "run llm-tidy init" remediation without importing manifest.
 var ErrManifestNotFound = manifest.ErrNotFound
 
+// PartialInventoryError reports that one or more backends could not be listed
+// (e.g. an unreachable Ollama daemon on a GGUF-only box) while a usable partial
+// inventory was still produced. Diff returns it alongside a non-nil DiffResult
+// so prune/sync can skip-with-warning (spec §5.3) instead of failing outright.
+// This is fail-safe for prune: a backend that did not report contributes no
+// untracked candidates, so a down backend can only ever reduce deletions.
+type PartialInventoryError struct{ Err error }
+
+func (e *PartialInventoryError) Error() string { return e.Err.Error() }
+func (e *PartialInventoryError) Unwrap() error  { return e.Err }
+
 // Option configures Tidy at construction.
 type Option func(*config)
 
@@ -158,16 +169,23 @@ func (t *Tidy) Inventory(ctx context.Context) ([]InstalledModel, error) {
 }
 
 // Diff loads the manifest and compares it against the live inventory.
+//
+// A manifest that cannot be loaded is fatal — without the desired state every
+// model would look untracked, so Diff refuses rather than risk a mass prune. A
+// backend that cannot be listed is not fatal: Diff returns the diff over the
+// partial inventory wrapped in a *PartialInventoryError, letting callers warn
+// and continue. Prune/sync over a partial inventory is fail-safe (a silent
+// backend yields no untracked candidates).
 func (t *Tidy) Diff(ctx context.Context) (*DiffResult, error) {
 	m, err := t.LoadManifest()
 	if err != nil {
 		return nil, err
 	}
-	inv, err := t.Inventory(ctx)
-	if err != nil {
-		return nil, err
-	}
+	inv, invErr := t.Inventory(ctx)
 	d := reconcile.Diff(m, inv)
+	if invErr != nil {
+		return &d, &PartialInventoryError{Err: invErr}
+	}
 	return &d, nil
 }
 
@@ -179,7 +197,11 @@ func (t *Tidy) Prune(
 	filter func(InstalledModel) bool,
 ) ([]InstalledModel, int64, error) {
 	d, err := t.Diff(ctx)
-	if err != nil {
+	// A partial inventory (a backend was unreachable) is not fatal for prune:
+	// the missing backend simply contributes no untracked candidates. Only a
+	// fatal error (e.g. the manifest could not be loaded) aborts.
+	var partial *PartialInventoryError
+	if err != nil && !errors.As(err, &partial) {
 		return nil, 0, err
 	}
 	plan := d.Untracked

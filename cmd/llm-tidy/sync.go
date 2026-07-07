@@ -40,10 +40,12 @@ func syncCmd() *cobra.Command {
 
 func runSync(ctx context.Context, w io.Writer, tidy *llmtidy.Tidy, b inventory.ModelBackend, dryRun bool) error {
 	diff, err := tidy.Diff(ctx)
-	if err != nil {
-		if errors.Is(err, llmtidy.ErrManifestNotFound) {
-			return fmt.Errorf("no manifest found at %s\nRun: llm-tidy init", tidy.ManifestPath())
-		}
+	if errors.Is(err, llmtidy.ErrManifestNotFound) {
+		return fmt.Errorf("no manifest found at %s\nRun: llm-tidy init", tidy.ManifestPath())
+	}
+	// An unreachable backend is a warning, not a failure: sync the backends
+	// that did respond rather than being unusable on a GGUF-only box.
+	if err := tolerateInventory(w, err); err != nil {
 		return err
 	}
 
