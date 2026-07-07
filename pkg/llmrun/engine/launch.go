@@ -42,10 +42,31 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 	// "already running" error then names the port that is actually in use.
 	pidFile := pidFilePath(dataDir, cfg)
 
-	// Check for existing PID file.
+	// Check for (and clean up) a stale PID file; error if a live server holds it.
 	if err := checkPIDFile(pidFile, cfg); err != nil {
 		return nil, err
 	}
+
+	// Atomically RESERVE the PID slot before spawning. Without this, two
+	// concurrent same-port launches both pass checkPIDFile and both spawn; the
+	// loser then fails to bind the port, and its teardown removes the winner's
+	// PID file, orphaning it. O_EXCL makes the loser fail here, before spawning.
+	pf, err := os.OpenFile(pidFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil, fmt.Errorf("server already starting on port %d", serverPort(cfg))
+		}
+		return nil, fmt.Errorf("reserving PID file: %w", err)
+	}
+	// Until the child PID is written and ownership passes to the running
+	// process, remove the reservation on any early return.
+	pidReserved := true
+	defer func() {
+		if pidReserved {
+			pf.Close()
+			os.Remove(pidFile)
+		}
+	}()
 
 	// Ensure log directory exists.
 	logDir := filepath.Join(dataDir, "logs")
@@ -72,14 +93,16 @@ func Launch(ctx context.Context, cfg RunConfig, caps Capabilities, dataDir strin
 		return nil, fmt.Errorf("starting llama.cpp: %w", err)
 	}
 
-	// Write PID file — required for double-launch prevention and cleanup.
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		// Can't track this process. Kill it and report the error.
+	// Record the child PID into the reserved file and hand ownership to the
+	// running process (cleanup is now the caller's job via Stop).
+	if _, err := pf.WriteString(strconv.Itoa(cmd.Process.Pid)); err != nil {
 		cmd.Process.Kill()
 		cancel()
 		stderrFile.Close()
 		return nil, fmt.Errorf("writing PID file: %w", err)
 	}
+	pf.Close()
+	pidReserved = false
 
 	// Determine endpoint for server mode.
 	endpoint := ""
@@ -166,7 +189,10 @@ func serverPort(cfg RunConfig) int {
 	return cfg.Port
 }
 
-// pidFilePath returns the per-port PID file path in dataDir.
+// pidFilePath returns the per-port PID file path in dataDir. It assumes a
+// server (port-bound) launch — the only kind Launch is used for today. A
+// hypothetical non-server launch (ServerMode=false) would resolve to the
+// default port's slot; add a distinct name here before introducing one.
 func pidFilePath(dataDir string, cfg RunConfig) string {
 	return filepath.Join(dataDir, fmt.Sprintf("server-%d.pid", serverPort(cfg)))
 }

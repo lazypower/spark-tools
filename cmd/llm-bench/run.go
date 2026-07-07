@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -123,7 +124,11 @@ func runCmd() *cobra.Command {
 			}()
 
 			result, err := runner.Run(ctx, s)
-			if err != nil && ctx.Err() == nil {
+			// A plain cancellation (Ctrl-C) is expected — the run is still
+			// finalized. Any other error (e.g. a failed results save) must
+			// surface even on the interrupt path, or partial results are lost
+			// silently.
+			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
 

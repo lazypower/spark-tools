@@ -176,7 +176,10 @@ func (s *SystemSampler) sampleCPU() (float64, bool) {
 	s.prevCPUTotal = total
 	s.prevCPUIdle = idle
 	if dTotal <= 0 {
-		return 0, true // no elapsed jiffies yet; valid but idle
+		// No jiffies elapsed (or a counter reset): utilization is not
+		// measurable for this interval, so report it as not-sampled rather than
+		// a fabricated 0%.
+		return 0, false
 	}
 	busy := float64(dTotal-dIdle) / float64(dTotal) * 100
 	if busy < 0 {

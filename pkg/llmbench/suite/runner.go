@@ -156,17 +156,11 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 	skipping := skipUntil != ""
 
 	// Execute jobs
+loop:
 	for i, js := range jobs {
 		select {
 		case <-ctx.Done():
-			// Finalize the partial run so the jobs that did complete are visible
-			// to results list/compare instead of being lost on Ctrl-C.
-			result.Interrupted = true
-			result.CompletedAt = time.Now()
-			if r.cfg.store != nil {
-				r.cfg.store.SaveRun(result)
-			}
-			return result, ctx.Err()
+			break loop // finalize below persists the partial run
 		default:
 		}
 
@@ -246,17 +240,25 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 		}
 	}
 
+	// A cancellation detected anywhere — including inside the final job's
+	// Execute, which the loop-top check would miss — marks the run interrupted
+	// so it is not persisted as complete.
+	if ctx.Err() != nil {
+		result.Interrupted = true
+	}
 	result.CompletedAt = time.Now()
 
-	// Save complete results. Surface a save failure (e.g. a full disk) rather
-	// than reporting success on a run that was never persisted.
+	// Persist the run (partial or complete). Surface a save failure (full disk,
+	// unwritable dir) rather than reporting success on a run that was never
+	// written — even on the interrupt path, where the partial results would
+	// otherwise be silently lost.
 	if r.cfg.store != nil {
 		if err := r.cfg.store.SaveRun(result); err != nil {
 			return result, fmt.Errorf("saving run results: %w", err)
 		}
 	}
 
-	return result, nil
+	return result, ctx.Err()
 }
 
 // continueFromMatches reports whether jobID names a job in the expanded set.

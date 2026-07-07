@@ -8,7 +8,31 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/lazypower/spark-tools/pkg/llmbench/metrics"
 )
+
+// Parallel probe failures must be reported to the caller, not silently dropped —
+// otherwise a job where every request failed would be marked OK with zero samples.
+func TestMeasureParallel_ReportsFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError) // every probe fails
+	}))
+	defer server.Close()
+
+	collector := metrics.NewCollector()
+	prompts := []string{"a", "b", "c", "d"}
+	collected, failures, firstErr := measureParallel(context.Background(), server.URL, prompts, 4, 2, 16, 0.0, 0, collector)
+	if failures == 0 {
+		t.Fatal("failing probes must be reported, not dropped")
+	}
+	if collected != 0 {
+		t.Errorf("no probe should have succeeded against a 500 server, got %d collected", collected)
+	}
+	if firstErr == nil {
+		t.Error("firstErr must be set when probes fail")
+	}
+}
 
 // A server that accepts the connection but never finishes streaming must not
 // hang the run: the per-request timeout must fire and return an error promptly.

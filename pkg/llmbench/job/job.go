@@ -177,8 +177,19 @@ func (e *Executor) Execute(ctx context.Context, params ExecParams, prompts []str
 	}
 
 	if params.ParallelSlots > 1 {
-		// Parallel load testing
-		measureParallel(ctx, endpoint, prompts, measurePrompts, params.ParallelSlots, params.MaxTokens, params.Temperature, params.Timeout, collector)
+		// Parallel load testing. A probe failure is a real result, not something
+		// to hide behind an OK status with fewer samples.
+		_, failures, firstErr := measureParallel(ctx, endpoint, prompts, measurePrompts, params.ParallelSlots, params.MaxTokens, params.Temperature, params.Timeout, collector)
+		if failures > 0 {
+			result.Status = JobStatusFailed
+			result.Error = &JobError{
+				Type:    probeErrorType(firstErr),
+				Message: fmt.Sprintf("%d parallel probe(s) failed: %v", failures, firstErr),
+			}
+			result.Duration = Duration{time.Since(start)}
+			result.SystemMetrics = sampler.Stop()
+			return result
+		}
 	} else {
 		// Sequential measurement
 		for i := 0; i < measurePrompts; i++ {
@@ -230,7 +241,11 @@ func probeErrorType(err error) string {
 	return "probe"
 }
 
-func measureParallel(ctx context.Context, endpoint string, prompts []string, totalPrompts, slots int, maxTokens int, temperature float64, timeout time.Duration, collector *metrics.Collector) {
+// measureParallel runs the probes across slots and returns how many succeeded,
+// how many failed, and the first failure. Failures must be surfaced by the
+// caller — dropping them and reporting an OK job with fewer samples would
+// misrepresent a run where requests timed out or errored.
+func measureParallel(ctx context.Context, endpoint string, prompts []string, totalPrompts, slots int, maxTokens int, temperature float64, timeout time.Duration, collector *metrics.Collector) (collected, failures int, firstErr error) {
 	promptsPerSlot := totalPrompts / slots
 	if promptsPerSlot < 1 {
 		promptsPerSlot = 1
@@ -268,8 +283,15 @@ func measureParallel(ctx context.Context, endpoint string, prompts []string, tot
 	wg.Wait()
 
 	for _, pr := range results {
-		if pr.Err == nil {
-			collector.Add(pr.Sample)
+		if pr.Err != nil {
+			failures++
+			if firstErr == nil {
+				firstErr = pr.Err
+			}
+			continue
 		}
+		collector.Add(pr.Sample)
+		collected++
 	}
+	return collected, failures, firstErr
 }
