@@ -98,9 +98,19 @@ func estimateMaxContext(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 		availableGB = 0
 	}
 
-	// KV cache bytes per token:
-	// 2 (K+V) * layers * embedding_dim * 2 bytes (FP16)
-	kvBytesPerToken := float64(2) * float64(meta.LayerCount) * float64(meta.EmbeddingSize) * 2.0
+	// KV cache bytes per token = 2 (K+V) * layers * kv_dim * 2 bytes (FP16).
+	//
+	// kv_dim accounts for Grouped-Query Attention: modern models share K/V
+	// across query-head groups, so the KV cache scales with the KV-head count,
+	// not the full embedding width — using the full width overestimates the KV
+	// cache by the GQA ratio (often 4-8x), which would understate the context
+	// the hardware can actually hold. Without a KV-head count (older metadata),
+	// fall back to the full embedding size (a conservative overestimate).
+	kvDim := float64(meta.EmbeddingSize)
+	if meta.HeadCount > 0 && meta.KVHeadCount > 0 && meta.KVHeadCount < meta.HeadCount {
+		kvDim = float64(meta.EmbeddingSize) * float64(meta.KVHeadCount) / float64(meta.HeadCount)
+	}
+	kvBytesPerToken := float64(2) * float64(meta.LayerCount) * kvDim * 2.0
 
 	if kvBytesPerToken <= 0 {
 		return defaultContext

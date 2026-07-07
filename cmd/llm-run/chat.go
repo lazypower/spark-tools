@@ -156,7 +156,7 @@ func runInference(modelRef string, flags inferenceFlags) error {
 	// Detect hardware and recommend defaults for unset fields.
 	hw, _ := hardware.DetectHardware()
 	if hw != nil {
-		rec := hardware.RecommendConfig(hw, nil)
+		rec := hardware.RecommendConfig(hw, resolved.GGUFMeta)
 		applyDefaults(&cfg, rec)
 	}
 

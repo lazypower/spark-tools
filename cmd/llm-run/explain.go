@@ -216,7 +216,7 @@ func showEffectiveConfig(modelRef, profileName string) error {
 	// Hardware detection.
 	hw, _ := hardware.DetectHardware()
 	if hw != nil {
-		rec := hardware.RecommendConfig(hw, nil)
+		rec := hardware.RecommendConfig(hw, resolved.GGUFMeta)
 		applyDefaults(&cfg, rec)
 	}
 

@@ -228,6 +228,51 @@ func TestEstimateMaxContext(t *testing.T) {
 	}
 }
 
+// A model with a small trained context on abundant memory must be capped at
+// its trained window, not the memory-based maximum — otherwise a 4K-trained
+// model is served at 32K and silently degrades past 4096. This is the core
+// model-aware-defaults fix: the metadata reaches the estimator.
+func TestEstimateMaxContext_CapsAtTrainedWindow(t *testing.T) {
+	hw := &HardwareInfo{TotalMemoryGB: 128}
+	meta := &gguf.GGUFMetadata{
+		ParameterCount: 7_000_000_000,
+		ContextLength:  4096, // 4K-trained
+		QuantType:      "Q4_K_M",
+		LayerCount:     32,
+		EmbeddingSize:  4096,
+		HeadCount:      32,
+		KVHeadCount:    8,
+	}
+	if got := estimateMaxContext(hw, meta); got != 4096 {
+		t.Errorf("a 4K-trained model on 128GB must cap at 4096, got %d", got)
+	}
+}
+
+// GQA (fewer KV heads than query heads) shrinks the KV cache, so a
+// memory-constrained model reaches a larger context than the same model costed
+// with the full embedding width. Without this the KV cache is overestimated by
+// the GQA ratio and the recommended context is needlessly small.
+func TestEstimateMaxContext_GQAExtendsContext(t *testing.T) {
+	hw := &HardwareInfo{TotalMemoryGB: 32}
+	base := gguf.GGUFMetadata{
+		ParameterCount: 32_000_000_000,
+		ContextLength:  131072, // large trained window → memory is the binding cap
+		QuantType:      "Q4_K_M",
+		LayerCount:     64,
+		EmbeddingSize:  5120,
+		HeadCount:      40,
+	}
+	mha := base // KVHeadCount 0 → full embedding width
+	gqa := base
+	gqa.KVHeadCount = 8 // 5:1 GQA → ~5x smaller KV cache
+
+	ctxMHA := estimateMaxContext(hw, &mha)
+	ctxGQA := estimateMaxContext(hw, &gqa)
+	if ctxGQA <= ctxMHA {
+		t.Errorf("GQA must allow a larger context than full-width MHA: MHA=%d GQA=%d", ctxMHA, ctxGQA)
+	}
+}
+
 func TestRecommendBatchSize(t *testing.T) {
 	tests := []struct {
 		name  string

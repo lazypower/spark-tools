@@ -79,7 +79,7 @@ func serveCmd() *cobra.Command {
 			// Hardware defaults.
 			hw, _ := hardware.DetectHardware()
 			if hw != nil {
-				rec := hardware.RecommendConfig(hw, nil)
+				rec := hardware.RecommendConfig(hw, resolved.GGUFMeta)
 				applyDefaults(&cfg, rec)
 			}
 

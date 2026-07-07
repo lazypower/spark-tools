@@ -129,6 +129,7 @@ func TestParse_BasicMetadata(t *testing.T) {
 		"llama.block_count":    uint32(32),
 		"llama.embedding_length": uint32(4096),
 		"llama.attention.head_count": uint32(32),
+		"llama.attention.head_count_kv": uint32(8),
 	})
 
 	meta, err := Parse(bytes.NewReader(data))
@@ -153,6 +154,9 @@ func TestParse_BasicMetadata(t *testing.T) {
 	}
 	if meta.HeadCount != 32 {
 		t.Errorf("heads: expected 32, got %d", meta.HeadCount)
+	}
+	if meta.KVHeadCount != 8 {
+		t.Errorf("kv heads: expected 8, got %d", meta.KVHeadCount)
 	}
 	if meta.Version != 3 {
 		t.Errorf("version: expected 3, got %d", meta.Version)
