@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 func TestFileMeta(t *testing.T) {
 	files := []ModelFile{
-		{Type: "file", Filename: "weights.safetensors", Size: 0, LFS: &api.LFS{OID: "abc", Size: 4096}},
+		{Type: "file", Filename: "weights.safetensors", Size: 0, LFS: &hub.LFS{OID: "abc", Size: 4096}},
 		{Type: "file", Filename: "config.json", Size: 12}, // non-LFS git file
 	}
 	// LFS file: size + hash come from the LFS block, NOT the (often-zero) Size.
@@ -46,7 +46,7 @@ func TestClient_Pull(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/tree/main"):
 			_ = json.NewEncoder(w).Encode([]ModelFile{
 				{Type: "file", Filename: "model.safetensors", Size: 0,
-					LFS: &api.LFS{OID: oid, Size: int64(len(content))}},
+					LFS: &hub.LFS{OID: oid, Size: int64(len(content))}},
 			})
 		case strings.Contains(r.URL.Path, "/resolve/main/"):
 			w.Header().Set("Content-Length", "")

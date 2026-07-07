@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 )
 
@@ -53,7 +53,7 @@ func loginCmd() *cobra.Command {
 
 			// Validate the token.
 			fmt.Print("  Verifying... ")
-			client := api.NewClient(api.WithToken(tokenValue))
+			client := hub.NewClient(hub.WithToken(tokenValue))
 			info, err := client.WhoAmI(context.Background())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "✗")
@@ -110,7 +110,7 @@ func whoamiCmd() *cobra.Command {
 			headerStyle := lipgloss.NewStyle().Bold(true)
 
 			// Validate the token.
-			client := api.NewClient(api.WithToken(tok.Token))
+			client := hub.NewClient(hub.WithToken(tok.Token))
 			info, err := client.WhoAmI(context.Background())
 			if err != nil {
 				fmt.Printf("\n  %s\n", headerStyle.Render("Auth Status"))

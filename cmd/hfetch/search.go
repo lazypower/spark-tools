@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 func searchCmd() *cobra.Command {
@@ -27,7 +27,7 @@ func searchCmd() *cobra.Command {
 				filter = "gguf"
 			}
 
-			models, err := client.Search(context.Background(), args[0], api.SearchOptions{
+			models, err := client.Search(context.Background(), args[0], hub.SearchOptions{
 				Filter: filter,
 				Sort:   sort,
 				Limit:  limit,

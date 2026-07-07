@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // quantServer mocks both the tree listing and resolve-file endpoints. fileBodies
 // maps base filename -> content; the tree is derived from its keys.
-func quantServer(t *testing.T, fileBodies map[string]string) *api.Client {
+func quantServer(t *testing.T, fileBodies map[string]string) *hub.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -44,7 +44,7 @@ func quantServer(t *testing.T, fileBodies map[string]string) *api.Client {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return api.NewClient(api.WithBaseURL(srv.URL), api.WithToken("t"))
+	return hub.NewClient(hub.WithBaseURL(srv.URL), hub.WithToken("t"))
 }
 
 func TestFetchQuantInfo_NVFP4Model(t *testing.T) {

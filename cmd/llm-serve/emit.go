@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
@@ -115,12 +115,12 @@ func resolveFacts(modelDir, repoTree string, stderr interface{ Write([]byte) (in
 	return artifact.DetectFacts(modelDir)
 }
 
-func loadRepoTree(path string) ([]api.ModelFile, error) {
+func loadRepoTree(path string) ([]hub.ModelFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading repo tree: %w", err)
 	}
-	var files []api.ModelFile
+	var files []hub.ModelFile
 	if err := json.Unmarshal(data, &files); err != nil {
 		return nil, fmt.Errorf("parsing repo tree JSON: %w", err)
 	}

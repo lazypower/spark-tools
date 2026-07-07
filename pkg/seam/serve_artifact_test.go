@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/internal/serving"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 )
@@ -27,28 +27,28 @@ import (
 // STATUS: GREEN — guards the delegation. If llm-serve ever grew its own gate (or
 // stopped consulting hfetch's), the contract would break here.
 
-func lfsShard(t *testing.T, dir, name, content string) api.ModelFile {
+func lfsShard(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(content))
-	return api.ModelFile{Type: "file", Filename: name, LFS: &api.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))}}
+	return hub.ModelFile{Type: "file", Filename: name, LFS: &hub.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))}}
 }
 
-func plainFile(t *testing.T, dir, name, content string) api.ModelFile {
+func plainFile(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
+	return hub.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
 }
 
 // completeArtifact lays down a minimal serve-ready Qwen NVFP4 model: one shard,
 // config, and a tokenizer — and returns the matching repo tree.
-func completeArtifact(t *testing.T) (dir string, repo []api.ModelFile) {
+func completeArtifact(t *testing.T) (dir string, repo []hub.ModelFile) {
 	dir = t.TempDir()
-	repo = []api.ModelFile{
+	repo = []hub.ModelFile{
 		lfsShard(t, dir, "model.safetensors", "WEIGHTS"),
 		plainFile(t, dir, "config.json", `{"architectures":["Qwen3MoeForCausalLM"],"model_type":"qwen3_moe"}`),
 		plainFile(t, dir, "tokenizer_config.json", `{"tokenizer_class":"Qwen2Tokenizer","chat_template":"x"}`),
@@ -112,7 +112,7 @@ func TestSeam_ServeRejectsUnservableQuant(t *testing.T) {
 	// can reject.
 	dir := t.TempDir()
 	awqConfig := `{"architectures":["Qwen3MoeForCausalLM"],"model_type":"qwen3_moe","quantization_config":{"quant_method":"awq","bits":4}}`
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		lfsShard(t, dir, "model.safetensors", "WEIGHTS"),
 		plainFile(t, dir, "config.json", awqConfig),
 		plainFile(t, dir, "tokenizer_config.json", `{"tokenizer_class":"Qwen2Tokenizer","chat_template":"x"}`),

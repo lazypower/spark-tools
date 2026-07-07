@@ -12,19 +12,19 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
 
 // treeServer returns a mock HF API serving the given recursive tree JSON for
 // any request, plus a client pointed at it.
-func treeServer(t *testing.T, treeJSON string) (*httptest.Server, *api.Client) {
+func treeServer(t *testing.T, treeJSON string) (*httptest.Server, *hub.Client) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, treeJSON)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, api.NewClient(api.WithBaseURL(srv.URL), api.WithToken("t"))
+	return srv, hub.NewClient(hub.WithBaseURL(srv.URL), hub.WithToken("t"))
 }
 
 // emptyRegistry returns a loaded registry with no models — for verifying a

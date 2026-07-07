@@ -7,27 +7,27 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // writeShard writes content to dir/name and returns an LFS ModelFile whose
 // OID/Size match — a correctly-downloaded weight file.
-func writeShard(t *testing.T, dir, name, content string) api.ModelFile {
+func writeShard(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(content))
-	return api.ModelFile{Type: "file", Filename: name,
-		LFS: &api.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))}}
+	return hub.ModelFile{Type: "file", Filename: name,
+		LFS: &hub.LFS{OID: hex.EncodeToString(sum[:]), Size: int64(len(content))}}
 }
 
-func writeConfig(t *testing.T, dir, name, content string) api.ModelFile {
+func writeConfig(t *testing.T, dir, name, content string) hub.ModelFile {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return api.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
+	return hub.ModelFile{Type: "file", Filename: name, Size: int64(len(content))}
 }
 
 func TestValidateSelected(t *testing.T) {
@@ -90,7 +90,7 @@ func TestResolveDest_Unknown_Errors(t *testing.T) {
 
 func TestReportCompleteness_CompleteModelPasses(t *testing.T) {
 	dir := t.TempDir()
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeShard(t, dir, "model.safetensors", "weights"),
 		writeConfig(t, dir, "config.json", `{}`),
 		writeConfig(t, dir, "tokenizer.json", `{}`),
@@ -105,7 +105,7 @@ func TestReportCompleteness_CompleteModelPasses(t *testing.T) {
 func TestReportCompleteness_IncompleteModelFails(t *testing.T) {
 	dir := t.TempDir()
 	// config.json is in the repo but never written locally → hard-fail.
-	repo := []api.ModelFile{
+	repo := []hub.ModelFile{
 		writeShard(t, dir, "model.safetensors", "weights"),
 		writeConfig(t, dir, "tokenizer.json", `{}`),
 		{Type: "file", Filename: "config.json", Size: 2},

@@ -17,7 +17,7 @@ import (
 	"github.com/lazypower/spark-tools/internal/download"
 	"github.com/lazypower/spark-tools/internal/fileset"
 	"github.com/lazypower/spark-tools/internal/gguf"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/hfetch/source"
@@ -422,7 +422,7 @@ func runPull(cmd *cobra.Command, modelID string, flags pullFlags) error {
 // reportCompleteness runs the completeness gate and surfaces the result.
 // Warnings are printed but non-fatal; any hard failure returns an error
 // (naming every offending file) so the process exits non-zero.
-func reportCompleteness(repoFiles []api.ModelFile, dir string, jsonOut bool) error {
+func reportCompleteness(repoFiles []hub.ModelFile, dir string, jsonOut bool) error {
 	rep, err := fileset.Verify(repoFiles, dir)
 	if err != nil {
 		return fmt.Errorf("completeness check: %w", err)

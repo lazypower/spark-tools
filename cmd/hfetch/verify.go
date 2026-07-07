@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/internal/fileset"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 )
@@ -82,7 +82,7 @@ func verifyCmd() *cobra.Command {
 // in the registry — goes through the completeness gate. It prints a per-model
 // result and returns an error iff the model is not serve-ready, so the caller
 // can tally failures across an --all sweep.
-func verifyOne(ctx context.Context, client *api.Client, reg *registry.Registry, modelID, output string) error {
+func verifyOne(ctx context.Context, client *hub.Client, reg *registry.Registry, modelID, output string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	fmt.Printf("\n  %s %s\n", headerStyle.Render("Verifying"), modelID)
 

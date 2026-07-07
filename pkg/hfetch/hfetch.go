@@ -15,7 +15,10 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/download"
 	"github.com/lazypower/spark-tools/internal/gguf"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	// aliased to `api` because this file also has an `api` struct field; a plain
+	// hub import would not conflict, but keeping the qualifier avoids churning
+	// every c.api.* field access.
+	api "github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/hfetch/source"

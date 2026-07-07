@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 )
 
 // Seam: hfetch's HF client (parser) <-> the real HuggingFace tree-listing
@@ -41,13 +41,13 @@ func TestSeam_HFTreeListing_LFSvsNonLFS(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := api.NewClient(api.WithBaseURL(srv.URL), api.WithToken("t"))
+	client := hub.NewClient(hub.WithBaseURL(srv.URL), hub.WithToken("t"))
 	files, err := client.ListFiles(context.Background(), "org/model")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	byName := map[string]api.ModelFile{}
+	byName := map[string]hub.ModelFile{}
 	for _, f := range files {
 		byName[f.Filename] = f
 	}
@@ -97,7 +97,7 @@ func TestSeam_HFHeadFile_NonLFSHasNoContentHash(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := api.NewClient(api.WithBaseURL(srv.URL), api.WithToken("t"))
+	client := hub.NewClient(hub.WithBaseURL(srv.URL), hub.WithToken("t"))
 	size, sha, err := client.HeadFile(context.Background(), "org/model", "config.json")
 	if err != nil {
 		t.Fatal(err)

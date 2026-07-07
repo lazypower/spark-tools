@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lazypower/spark-tools/internal/gguf"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 	"github.com/lazypower/spark-tools/pkg/hfetch/quant"
 )
@@ -23,11 +23,11 @@ func infoCmd() *cobra.Command {
 			showFiles, _ := cmd.Flags().GetBool("files")
 			remote, _ := cmd.Flags().GetBool("remote")
 
-			var client *api.Client
+			var client *hub.Client
 			if remote {
 				// Skip cache — create client without cache dir.
 				tok := config.ResolveToken(resolveToken(cmd))
-				client = api.NewClient(api.WithToken(tok.Token))
+				client = hub.NewClient(hub.WithToken(tok.Token))
 			} else {
 				client = newAPIClient(cmd)
 			}
@@ -88,7 +88,7 @@ func infoCmd() *cobra.Command {
 // fetchQuantInfo reads a model's quantization format from its config files
 // without downloading the weights. Returns nil when the model is
 // unquantized or its config is unreadable.
-func fetchQuantInfo(ctx context.Context, client *api.Client, modelID string) *quant.Info {
+func fetchQuantInfo(ctx context.Context, client *hub.Client, modelID string) *quant.Info {
 	files, err := client.ListFiles(ctx, modelID)
 	if err != nil {
 		return nil

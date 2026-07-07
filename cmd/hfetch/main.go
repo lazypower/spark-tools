@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/hub"
 	"github.com/lazypower/spark-tools/internal/progress"
 	"github.com/lazypower/spark-tools/internal/version"
-	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
 )
 
@@ -87,12 +87,12 @@ func resolveToken(cmd *cobra.Command) string {
 }
 
 // newAPIClient creates an API client with token and cache dir configured.
-func newAPIClient(cmd *cobra.Command) *api.Client {
+func newAPIClient(cmd *cobra.Command) *hub.Client {
 	tok := config.ResolveToken(resolveToken(cmd))
 	dirs := config.Dirs()
-	return api.NewClient(
-		api.WithToken(tok.Token),
-		api.WithCacheDir(dirs.Cache),
+	return hub.NewClient(
+		hub.WithToken(tok.Token),
+		hub.WithCacheDir(dirs.Cache),
 	)
 }
 
