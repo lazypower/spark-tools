@@ -12,9 +12,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/reconcile"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/reconcile"
 )
 
 var (

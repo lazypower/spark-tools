@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/ollama"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
 )
 
 // deadOllamaURL returns the URL of an Ollama server that has been shut down, so

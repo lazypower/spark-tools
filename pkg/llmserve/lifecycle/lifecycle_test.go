@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // fakeRuntime tracks which spec is currently "up" and returns the RuntimeState

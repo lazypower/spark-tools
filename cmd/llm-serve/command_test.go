@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // --- flag/value parsing ----------------------------------------------------

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // Seam: hfetch's completeness gate (pkg/hfetch/fileset) <-> llm-serve's emit

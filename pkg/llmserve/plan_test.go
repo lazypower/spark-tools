@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 func qwenFacts() serving.ArtifactFacts {

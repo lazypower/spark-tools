@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
+	"github.com/lazypower/spark-tools/internal/inventory"
 )
 
 func gguf(name, path string) InstalledModel {

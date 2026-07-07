@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lazypower/spark-tools/internal/gguf"
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/ollama"
+	"github.com/lazypower/spark-tools/internal/reconcile"
 	"github.com/lazypower/spark-tools/pkg/hfetch"
 	hfconfig "github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/interlock"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/ollama"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/reconcile"
 )
 
 // Re-exports keep callers from importing every sub-package.
@@ -49,7 +49,7 @@ var ErrManifestNotFound = manifest.ErrNotFound
 type PartialInventoryError struct{ Err error }
 
 func (e *PartialInventoryError) Error() string { return e.Err.Error() }
-func (e *PartialInventoryError) Unwrap() error  { return e.Err }
+func (e *PartialInventoryError) Unwrap() error { return e.Err }
 
 // Option configures Tidy at construction.
 type Option func(*config)

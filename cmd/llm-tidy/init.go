@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 )
 
 func initCmd() *cobra.Command {

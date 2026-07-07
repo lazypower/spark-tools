@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/quant"
 )
 

@@ -16,9 +16,9 @@ import (
 
 	"github.com/lazypower/spark-tools/internal/download"
 	"github.com/lazypower/spark-tools/internal/fileset"
+	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/hfetch/config"
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/hfetch/source"
 )

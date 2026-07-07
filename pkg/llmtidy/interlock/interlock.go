@@ -16,7 +16,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
+	"github.com/lazypower/spark-tools/internal/inventory"
 )
 
 // InstalledModel is the prune candidate (re-aliased to avoid an import in callers).

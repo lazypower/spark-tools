@@ -10,12 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/hfetch/api"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 func emitCmd() *cobra.Command {

@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // PlanRequest is everything needed to turn a verified artifact + capabilities

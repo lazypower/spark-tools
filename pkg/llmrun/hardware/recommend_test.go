@@ -3,7 +3,7 @@ package hardware
 import (
 	"testing"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
+	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 )
 
@@ -136,11 +136,11 @@ func TestRecommendConfig_SmallMachine(t *testing.T) {
 
 func TestEstimateMaxContext(t *testing.T) {
 	tests := []struct {
-		name     string
-		hw       *HardwareInfo
-		meta     *gguf.GGUFMetadata
-		wantMin  int
-		wantMax  int
+		name    string
+		hw      *HardwareInfo
+		meta    *gguf.GGUFMetadata
+		wantMin int
+		wantMax int
 	}{
 		{
 			name:    "nil hardware",
@@ -179,8 +179,8 @@ func TestEstimateMaxContext(t *testing.T) {
 				LayerCount:     64,
 				EmbeddingSize:  5120,
 			},
-			wantMin: 8192,   // Should be reasonably large
-			wantMax: 32768,  // Capped at model's trained length
+			wantMin: 8192,  // Should be reasonably large
+			wantMax: 32768, // Capped at model's trained length
 		},
 		{
 			name: "7B model Q4_K_M on 16GB",
@@ -230,9 +230,9 @@ func TestEstimateMaxContext(t *testing.T) {
 
 func TestRecommendBatchSize(t *testing.T) {
 	tests := []struct {
-		name    string
-		memGB   float64
-		want    int
+		name  string
+		memGB float64
+		want  int
 	}{
 		{"4GB RAM", 4, 256},
 		{"8GB RAM", 8, 256},
@@ -255,10 +255,10 @@ func TestRecommendBatchSize(t *testing.T) {
 
 func TestEstimateModelSizeGB(t *testing.T) {
 	tests := []struct {
-		name     string
-		meta     *gguf.GGUFMetadata
-		wantMin  float64
-		wantMax  float64
+		name    string
+		meta    *gguf.GGUFMetadata
+		wantMin float64
+		wantMax float64
 	}{
 		{
 			name: "7B Q4_K_M",
@@ -288,8 +288,8 @@ func TestEstimateModelSizeGB(t *testing.T) {
 			wantMax: 50.0,
 		},
 		{
-			name: "nil metadata",
-			meta: nil,
+			name:    "nil metadata",
+			meta:    nil,
 			wantMin: 0,
 			wantMax: 0,
 		},
@@ -321,9 +321,9 @@ func TestRoundDownContext(t *testing.T) {
 		want  int
 	}{
 		{0, 512},
-		{100, 0},    // 100/256*256 = 0
+		{100, 0}, // 100/256*256 = 0
 		{512, 512},
-		{1000, 768},  // 1000/256*256 = 768
+		{1000, 768}, // 1000/256*256 = 768
 		{4096, 4096},
 		{8192, 8192},
 		{10000, 9984}, // 10000/256*256 = 9984

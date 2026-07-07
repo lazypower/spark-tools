@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 )
 
 // Seam: hfetch registry (writer) <-> llm-tidy inventory (reader).

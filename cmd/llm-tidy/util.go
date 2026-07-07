@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
 	"github.com/lazypower/spark-tools/internal/progress"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 )
 
 // formatSize delegates to the shared formatter used elsewhere in spark-tools.

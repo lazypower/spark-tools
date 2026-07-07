@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
+	"github.com/lazypower/spark-tools/internal/gguf"
 )
 
 func filesCmd() *cobra.Command {

@@ -14,16 +14,16 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve/artifact"
 	"github.com/lazypower/spark-tools/pkg/llmserve/contract"
 	"github.com/lazypower/spark-tools/pkg/llmserve/emit"
-	"github.com/lazypower/spark-tools/pkg/llmserve/fingerprint"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 	"github.com/lazypower/spark-tools/pkg/llmserve/profiles"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // Re-export the common types so consumers import only llmserve.

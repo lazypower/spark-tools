@@ -16,11 +16,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lazypower/spark-tools/internal/inventory"
+	"github.com/lazypower/spark-tools/internal/reconcile"
 	"github.com/lazypower/spark-tools/pkg/hfetch/registry"
 	"github.com/lazypower/spark-tools/pkg/llmtidy"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/inventory"
 	"github.com/lazypower/spark-tools/pkg/llmtidy/manifest"
-	"github.com/lazypower/spark-tools/pkg/llmtidy/reconcile"
 )
 
 func model(name string, b inventory.ModelBackend, size int64) inventory.InstalledModel {

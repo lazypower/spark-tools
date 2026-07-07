@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 
+	"github.com/lazypower/spark-tools/internal/gguf"
 	"github.com/lazypower/spark-tools/internal/progress"
-	"github.com/lazypower/spark-tools/pkg/hfetch/gguf"
 )
 
 // PickerItem represents a selectable file in the GGUF picker.

@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lazypower/spark-tools/internal/serving"
 	"github.com/lazypower/spark-tools/pkg/llmserve"
 	"github.com/lazypower/spark-tools/pkg/llmserve/instance"
 	"github.com/lazypower/spark-tools/pkg/llmserve/lifecycle"
 	"github.com/lazypower/spark-tools/pkg/llmserve/liveness"
 	"github.com/lazypower/spark-tools/pkg/llmserve/runtime"
-	"github.com/lazypower/spark-tools/pkg/llmserve/serving"
 )
 
 // Seam: B1 emit (the identity labels it stamps) <-> B2 liveness (the labels it
