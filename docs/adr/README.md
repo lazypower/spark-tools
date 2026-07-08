@@ -12,3 +12,4 @@ component design lives in `specs/`.
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-llm-serve-resident-set-co-residency.md) | llm-serve resident-set co-residency | Proposed |
+| [0002](0002-single-gpu-lease-controller.md) | Single-GPU lease controller | Proposed (considered, not scheduled) |
