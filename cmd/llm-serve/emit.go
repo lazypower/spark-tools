@@ -24,6 +24,7 @@ func emitCmd() *cobra.Command {
 		name        string
 		caps        []string
 		ctx         int
+		gpuMemUtil  float64
 		dtype       string
 		image       string
 		accelerator string
@@ -63,6 +64,7 @@ func emitCmd() *cobra.Command {
 				ServedName:   name,
 				Capabilities: capList,
 				ContextLen:   ctx,
+				GPUMemUtil:   gpuMemUtil,
 				Dtype:        dtype,
 				Target:       llmserve.Fingerprint{Engine: image, Accelerator: accelerator},
 			}
@@ -87,6 +89,7 @@ func emitCmd() *cobra.Command {
 	f.StringVar(&name, "name", "", "served model name / alias (required)")
 	f.StringSliceVar(&caps, "cap", nil, "requested capability (repeatable): guided-decoding, thinking, tool-calling, vision")
 	f.IntVar(&ctx, "ctx", 0, "max model length (tokens); 0 leaves it to the host default")
+	f.Float64Var(&gpuMemUtil, "gpu-mem-util", 0, "vLLM --gpu-memory-utilization fraction (0,1]; 0/unset defers to the hardware default, then vLLM's own (0.9). Set a cap to co-reside instances on one box")
 	f.StringVar(&dtype, "dtype", "", "vLLM --dtype (default auto)")
 	f.StringVar(&image, "image", "", "engine image digest/tag, e.g. vllm/vllm-openai@v0.23.0 (required) — also the fingerprint engine")
 	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint (vendor:arch)")
