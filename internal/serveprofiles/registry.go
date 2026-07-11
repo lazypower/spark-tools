@@ -12,6 +12,12 @@ import (
 // seededFingerprint, stamped on each profile's AuthoredAgainst.
 const seededProvenance = "run.sh MODEL_MAP + AGENTS.md (vllm-config), 2026-06"
 
+// vlAcceptanceProvenance marks the Qwen3-VL dense entry, whose claims come from a
+// real on-box vision acceptance rather than run.sh (which never served a VLM).
+// Still `asserted` per §8.0 — a manual accept is strong evidence but the `proven`
+// verdict is the v2 probe's to stamp, not the author's.
+const vlAcceptanceProvenance = "on-box vision acceptance: Qwen3-VL-32B-Instruct-NVFP4, tensor-warden GB10, vLLM v0.23.0 (2026-07-08)"
+
 // seededFingerprint is the GB10 Spark environment the v1 profiles were authored
 // against (AGENTS.md: image v0.23.0, GB10 / SM 12.1). The staleness check warns
 // when an operator emits for anything that diverges from this.
@@ -108,6 +114,29 @@ var builtins = []ArchProfile{
 			asserted(serving.Thinking, false),
 			asserted(serving.ToolCalling, false),
 			asserted(serving.Vision, true),
+		},
+	},
+	// Qwen3-VL DENSE (Instruct) — config arch Qwen3VLForConditionalGeneration,
+	// model_type qwen3_vl. Distinct from the MoE VL arch
+	// (Qwen3VLMoeForConditionalGeneration, an alt of Qwen3Moe): this is the dense
+	// VL line (2B/4B/8B/32B). Vision + guided-decoding VALIDATED on-box
+	// (tensor-warden GB10, Qwen3-VL-32B-Instruct-NVFP4, vLLM v0.23.0): the
+	// multimodal path serves and `response_format` json_schema enforces on it.
+	// Client note (not a launch flag): the working structured-output API is
+	// `response_format`, NOT the legacy top-level `guided_json` field, which is
+	// silently ignored in v0.23.0. Thinking + tool-calling left false: the tested
+	// build is the non-thinking Instruct variant and VL tool-calling was not
+	// validated (its parser differs from qwen3_coder) — extend when a Thinking or
+	// agentic build is accepted. compressed-tensors NVFP4 auto-detected (QuantFlags),
+	// no quant flag. Vision is gated by the vision-requires-processor rule; this
+	// artifact ships preprocessor_config.json + video_preprocessor_config.json.
+	{
+		Arch: "Qwen3VLForConditionalGeneration",
+		Claims: []Claim{
+			{Capability: serving.GuidedDecoding, Supported: true, Status: StatusAsserted, Provenance: vlAcceptanceProvenance},
+			{Capability: serving.Thinking, Supported: false, Status: StatusAsserted, Provenance: vlAcceptanceProvenance},
+			{Capability: serving.ToolCalling, Supported: false, Status: StatusAsserted, Provenance: vlAcceptanceProvenance},
+			{Capability: serving.Vision, Supported: true, Status: StatusAsserted, Provenance: vlAcceptanceProvenance},
 		},
 	},
 }
