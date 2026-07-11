@@ -28,6 +28,14 @@ type HardwareProfile struct {
 	// case. An accelerator whose safe default genuinely differs sets a non-zero
 	// value here.
 	GPUMemUtil float64
+	// MaxNumSeqs is the default vLLM --max-num-seqs (max concurrent sequences per
+	// iteration) for this accelerator; a positive integer, or zero for UNSET. It
+	// is the second budget lever: KV footprint = f(gpu-mem-util, max-model-len,
+	// max-num-seqs), so a co-residency budgeter trims concurrency to fit a member
+	// alongside others. Unset for the same reason GPUMemUtil is — one model
+	// should use vLLM's own default — so this stays additive until the budgeter
+	// (ADR 0001) sets it.
+	MaxNumSeqs int
 }
 
 // hardwareBuiltins is the v1 hardware-profile registry. Today the one accelerator
@@ -40,6 +48,7 @@ var hardwareBuiltins = []HardwareProfile{
 	{
 		Accelerator: seededFingerprint.Accelerator, // nvidia:gb10:sm121
 		GPUMemUtil:  0,                              // unset: one model uses the whole 121 GB pool
+		MaxNumSeqs:  0,                              // unset: defer to vLLM's own concurrency default
 	},
 }
 

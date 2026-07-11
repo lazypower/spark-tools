@@ -308,6 +308,45 @@ func flags(r *Resolved) []string {
 	return r.Flags
 }
 
+func TestResolve_MaxNumSeqs_EmitsFlag(t *testing.T) {
+	r := req("qwen-36b-fp4")
+	r.MaxNumSeqs = 64
+	got, err := Resolve(r, qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if v := flagValue(got.Flags, "--max-num-seqs"); v != "64" {
+		t.Errorf("--max-num-seqs 64 must emit --max-num-seqs 64, got %q; flags=%v", v, got.Flags)
+	}
+}
+
+func TestResolve_MaxNumSeqs_Unset_OmitsFlag(t *testing.T) {
+	// Single-instance unchanged: the GB10 hardware default is unset, so a bare
+	// request emits no concurrency cap and vLLM keeps its own default.
+	got, err := Resolve(req("qwen-36b-fp4"), qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if hasFlag(got.Flags, "--max-num-seqs") {
+		t.Errorf("an unset max-num-seqs on GB10 must NOT emit the flag; flags=%v", got.Flags)
+	}
+}
+
+func TestResolve_MaxNumSeqs_Negative_Rejected(t *testing.T) {
+	for _, bad := range []int{-1, -256} {
+		r := req("qwen-36b-fp4")
+		r.MaxNumSeqs = bad
+		_, err := Resolve(r, qwenFacts())
+		re, ok := AsRejection(err)
+		if !ok {
+			t.Fatalf("max-num-seqs %d must be rejected fail-closed, got %v", bad, err)
+		}
+		if re.Rule != "max-num-seqs-range" {
+			t.Errorf("max-num-seqs %d must fire the max-num-seqs-range rule, got %q", bad, re.Rule)
+		}
+	}
+}
+
 func TestResolve_ContractKey_ModeIsOrderIndependent(t *testing.T) {
 	facts := qwenFacts()
 	facts.HasVision = true

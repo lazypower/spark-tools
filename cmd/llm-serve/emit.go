@@ -25,6 +25,7 @@ func emitCmd() *cobra.Command {
 		caps        []string
 		ctx         int
 		gpuMemUtil  float64
+		maxNumSeqs  int
 		dtype       string
 		image       string
 		accelerator string
@@ -42,6 +43,9 @@ func emitCmd() *cobra.Command {
 			"hfetch tree listing) to re-run the completeness gate before emitting; otherwise the\n" +
 			"artifact is trusted to have been gated at pull time.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateBudgetFlags(cmd); err != nil {
+				return err
+			}
 			capList, err := parseCaps(caps)
 			if err != nil {
 				return err
@@ -65,6 +69,7 @@ func emitCmd() *cobra.Command {
 				Capabilities: capList,
 				ContextLen:   ctx,
 				GPUMemUtil:   gpuMemUtil,
+				MaxNumSeqs:   maxNumSeqs,
 				Dtype:        dtype,
 				Target:       llmserve.Fingerprint{Engine: image, Accelerator: accelerator},
 			}
@@ -90,6 +95,7 @@ func emitCmd() *cobra.Command {
 	f.StringSliceVar(&caps, "cap", nil, "requested capability (repeatable): guided-decoding, thinking, tool-calling, vision")
 	f.IntVar(&ctx, "ctx", 0, "max model length (tokens); 0 leaves it to the host default")
 	f.Float64Var(&gpuMemUtil, "gpu-mem-util", 0, "vLLM --gpu-memory-utilization fraction (0,1]; 0/unset defers to the hardware default, then vLLM's own (0.9). Set a cap to co-reside instances on one box")
+	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to the hardware default, then vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&dtype, "dtype", "", "vLLM --dtype (default auto)")
 	f.StringVar(&image, "image", "", "engine image digest/tag, e.g. vllm/vllm-openai@v0.23.0 (required) — also the fingerprint engine")
 	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint (vendor:arch)")
@@ -170,6 +176,30 @@ func parseMounts(mounts []string) ([]servespec.Mount, error) {
 		out = append(out, servespec.Mount{Host: absHost, Container: container})
 	}
 	return out, nil
+}
+
+// validateBudgetFlags rejects an explicitly-typed 0 for either budget lever. The
+// resolver treats a zero value as "unset" (the omitted-flag sentinel), and that
+// is the one case it structurally cannot tell apart from an operator typing 0 —
+// only cobra's Changed() sees the difference. Without this guard, `--max-num-seqs
+// 0` / `--gpu-mem-util 0` would silently fall through to a default instead of
+// failing closed, which is both a fail-open and incoherent (an explicit -1 is
+// rejected while an explicit 0 is not). Every other out-of-domain value
+// (negative, > 1, NaN) is still caught by the resolver, the single range
+// authority for all callers including the budgeter.
+func validateBudgetFlags(cmd *cobra.Command) error {
+	f := cmd.Flags()
+	if f.Changed("gpu-mem-util") {
+		if v, _ := f.GetFloat64("gpu-mem-util"); v == 0 {
+			return fmt.Errorf("--gpu-mem-util 0 is not a fraction in (0, 1]; omit the flag to use the default")
+		}
+	}
+	if f.Changed("max-num-seqs") {
+		if v, _ := f.GetInt("max-num-seqs"); v == 0 {
+			return fmt.Errorf("--max-num-seqs 0 is not a positive count; omit the flag to use the default")
+		}
+	}
+	return nil
 }
 
 func parseTarget(target string) (servespec.Target, error) {

@@ -7,10 +7,13 @@ func TestLookupHardware_GB10_SeededUnset(t *testing.T) {
 	if !ok {
 		t.Fatal("the GB10 accelerator the v1 profiles were authored against must have a hardware profile")
 	}
-	// The single-instance case must be unchanged: the default is deliberately
-	// unset so one model uses the whole box (vLLM's own default wins).
+	// The single-instance case must be unchanged: both budget levers are
+	// deliberately unset so one model uses the whole box (vLLM's own defaults win).
 	if hw.GPUMemUtil != 0 {
 		t.Errorf("GB10 gpu-mem-util default must be unset (0) to keep single-instance behavior, got %g", hw.GPUMemUtil)
+	}
+	if hw.MaxNumSeqs != 0 {
+		t.Errorf("GB10 max-num-seqs default must be unset (0) to keep single-instance behavior, got %d", hw.MaxNumSeqs)
 	}
 	// It is stamped with the environment it was authored against, exactly as the
 	// arch profiles are — so the seam is staleness-checkable.

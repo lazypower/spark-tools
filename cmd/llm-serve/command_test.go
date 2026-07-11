@@ -298,28 +298,40 @@ func TestEmitCmd_GPUMemUtil(t *testing.T) {
 		"--mount", dir + ":/models",
 	}
 
-	t.Run("valid cap reaches the spec", func(t *testing.T) {
+	t.Run("both budget levers reach the spec", func(t *testing.T) {
 		cmd := emitCmd()
 		var out, errb bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&errb)
-		cmd.SetArgs(append(append([]string{}, base...), "--gpu-mem-util", "0.4"))
+		cmd.SetArgs(append(append([]string{}, base...), "--gpu-mem-util", "0.4", "--max-num-seqs", "64"))
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("emit: %v\nstderr:\n%s", err, errb.String())
 		}
-		if spec := out.String(); !strings.Contains(spec, "--gpu-memory-utilization") || !strings.Contains(spec, "0.4") {
+		spec := out.String()
+		if !strings.Contains(spec, "--gpu-memory-utilization") || !strings.Contains(spec, "0.4") {
 			t.Errorf("emitted spec must carry --gpu-memory-utilization 0.4, got:\n%s", spec)
+		}
+		if !strings.Contains(spec, "--max-num-seqs") || !strings.Contains(spec, "64") {
+			t.Errorf("emitted spec must carry --max-num-seqs 64, got:\n%s", spec)
 		}
 	})
 
 	t.Run("out-of-range fails closed", func(t *testing.T) {
-		cmd := emitCmd()
-		var out, errb bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(&errb)
-		cmd.SetArgs(append(append([]string{}, base...), "--gpu-mem-util", "1.5"))
-		if err := cmd.Execute(); err == nil {
-			t.Errorf("gpu-mem-util 1.5 must be rejected; stdout:\n%s", out.String())
+		for _, bad := range [][]string{
+			{"--gpu-mem-util", "1.5"},
+			{"--gpu-mem-util", "NaN"},
+			{"--gpu-mem-util", "0"},   // explicit 0: the resolver's unset sentinel is blind to it — CLI must reject
+			{"--max-num-seqs", "-1"},
+			{"--max-num-seqs", "0"},   // explicit 0: not a positive count, must fail closed not silently default
+		} {
+			cmd := emitCmd()
+			var out, errb bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errb)
+			cmd.SetArgs(append(append([]string{}, base...), bad...))
+			if err := cmd.Execute(); err == nil {
+				t.Errorf("%v must be rejected; stdout:\n%s", bad, out.String())
+			}
 		}
 	})
 }
