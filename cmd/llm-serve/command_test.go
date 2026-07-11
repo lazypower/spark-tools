@@ -282,3 +282,56 @@ func TestEmitCmd_SeparatesStdoutAndStderr(t *testing.T) {
 		t.Errorf("the no-repo-tree advisory must go to stderr, got:\n%s", errb.String())
 	}
 }
+
+// TestEmitCmd_GPUMemUtil proves the memory-budget lever reaches the rendered spec
+// (the co-residency foundation) and that an out-of-range value fails closed.
+func TestEmitCmd_GPUMemUtil(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"architectures":["Qwen3MoeForCausalLM"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{
+		"--model-dir", dir,
+		"--name", "qwen-test",
+		"--image", "vllm/vllm-openai@v0.23.0",
+		"--mount", dir + ":/models",
+	}
+
+	t.Run("both budget levers reach the spec", func(t *testing.T) {
+		cmd := emitCmd()
+		var out, errb bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&errb)
+		cmd.SetArgs(append(append([]string{}, base...), "--gpu-mem-util", "0.4", "--max-num-seqs", "64"))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("emit: %v\nstderr:\n%s", err, errb.String())
+		}
+		spec := out.String()
+		if !strings.Contains(spec, "--gpu-memory-utilization") || !strings.Contains(spec, "0.4") {
+			t.Errorf("emitted spec must carry --gpu-memory-utilization 0.4, got:\n%s", spec)
+		}
+		if !strings.Contains(spec, "--max-num-seqs") || !strings.Contains(spec, "64") {
+			t.Errorf("emitted spec must carry --max-num-seqs 64, got:\n%s", spec)
+		}
+	})
+
+	t.Run("out-of-range fails closed", func(t *testing.T) {
+		for _, bad := range [][]string{
+			{"--gpu-mem-util", "1.5"},
+			{"--gpu-mem-util", "NaN"},
+			{"--gpu-mem-util", "0"},   // explicit 0: the resolver's unset sentinel is blind to it — CLI must reject
+			{"--max-num-seqs", "-1"},
+			{"--max-num-seqs", "0"},   // explicit 0: not a positive count, must fail closed not silently default
+		} {
+			cmd := emitCmd()
+			var out, errb bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errb)
+			cmd.SetArgs(append(append([]string{}, base...), bad...))
+			if err := cmd.Execute(); err == nil {
+				t.Errorf("%v must be rejected; stdout:\n%s", bad, out.String())
+			}
+		}
+	})
+}

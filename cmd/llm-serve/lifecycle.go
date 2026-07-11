@@ -31,7 +31,8 @@ func upCmd() *cobra.Command {
 	var (
 		modelDir, name, served, image, accelerator, target, repoTree string
 		caps, mounts                                                 []string
-		ctx, port                                                    int
+		ctx, port, maxNumSeqs                                        int
+		gpuMemUtil                                                   float64
 		timeout                                                      time.Duration
 	)
 	cmd := &cobra.Command{
@@ -44,6 +45,9 @@ func upCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if target != "" && target != "compose" {
 				return fmt.Errorf("B1 drives compose only; --target %q not supported", target)
+			}
+			if err := validateBudgetFlags(cmd); err != nil {
+				return err
 			}
 			capList, err := parseCaps(caps)
 			if err != nil {
@@ -69,6 +73,8 @@ func upCmd() *cobra.Command {
 				Facts:        facts,
 				Capabilities: capList,
 				ContextLen:   ctx,
+				GPUMemUtil:   gpuMemUtil,
+				MaxNumSeqs:   maxNumSeqs,
 				Image:        image,
 				Accelerator:  accelerator,
 				Port:         port,
@@ -99,6 +105,8 @@ func upCmd() *cobra.Command {
 	f.StringVar(&served, "served-name", "", "served model name (default: --name)")
 	f.StringSliceVar(&caps, "cap", nil, "requested capability (repeatable)")
 	f.IntVar(&ctx, "ctx", 0, "max model length (tokens)")
+	f.Float64Var(&gpuMemUtil, "gpu-mem-util", 0, "vLLM --gpu-memory-utilization fraction (0,1]; 0/unset uses the whole box (vLLM 0.9). Cap it to co-reside instances")
+	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&image, "image", "", "engine image, e.g. vllm/vllm-openai@v0.23.0 (required)")
 	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")

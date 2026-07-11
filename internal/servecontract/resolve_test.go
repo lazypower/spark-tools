@@ -1,6 +1,7 @@
 package servecontract
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -239,6 +240,110 @@ func TestResolve_Reject_UnsupportedCapability(t *testing.T) {
 	_, err := Resolve(req("glm-47-flash", serving.Thinking), facts)
 	if re, ok := AsRejection(err); !ok || re.Rule != "unsupported-capability" {
 		t.Fatalf("expected unsupported-capability rejection, got %v", err)
+	}
+}
+
+func TestResolve_GPUMemUtil_EmitsFlag(t *testing.T) {
+	r := req("qwen-36b-fp4")
+	r.GPUMemUtil = 0.4
+	got, err := Resolve(r, qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if v := flagValue(got.Flags, "--gpu-memory-utilization"); v != "0.4" {
+		t.Errorf("--gpu-mem-util 0.4 must emit --gpu-memory-utilization 0.4, got %q; flags=%v", v, got.Flags)
+	}
+}
+
+func TestResolve_GPUMemUtil_ExactlyOne_Allowed(t *testing.T) {
+	r := req("qwen-36b-fp4")
+	r.GPUMemUtil = 1.0
+	got, err := Resolve(r, qwenFacts())
+	if err != nil {
+		t.Fatalf("gpu-mem-util 1.0 is the top of the (0,1] range and must resolve, got %v", err)
+	}
+	if v := flagValue(got.Flags, "--gpu-memory-utilization"); v != "1" {
+		t.Errorf("gpu-mem-util 1.0 must emit --gpu-memory-utilization 1, got %q", v)
+	}
+}
+
+func TestResolve_GPUMemUtil_Unset_OmitsFlag(t *testing.T) {
+	// The single-instance case must be unchanged: no flag → vLLM uses the whole
+	// box. The GB10 hardware profile's default is deliberately unset, so a bare
+	// request (matching accelerator, no flag) emits nothing.
+	got, err := Resolve(req("qwen-36b-fp4"), qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if hasFlag(got.Flags, "--gpu-memory-utilization") {
+		t.Errorf("an unset gpu-mem-util on GB10 must NOT emit the flag (single-instance uses the whole box); flags=%v", got.Flags)
+	}
+}
+
+func TestResolve_GPUMemUtil_OutOfRange_Rejected(t *testing.T) {
+	// NaN and ±Inf are the fail-OPEN traps: NaN is != 0 (so it reads as "set")
+	// yet every ordered comparison against it is false, so a naive range test
+	// lets it through and the cap silently vanishes. A non-finite or out-of-range
+	// fraction must fail closed, never reach the launch spec.
+	for _, bad := range []float64{1.5, 2.0, -0.2, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		r := req("qwen-36b-fp4")
+		r.GPUMemUtil = bad
+		got, err := Resolve(r, qwenFacts())
+		re, ok := AsRejection(err)
+		if !ok {
+			t.Fatalf("gpu-mem-util %g must be rejected fail-closed, got %v (flags=%v)", bad, err, flags(got))
+		}
+		if re.Rule != "gpu-mem-util-range" {
+			t.Errorf("gpu-mem-util %g must fire the gpu-mem-util-range rule, got %q", bad, re.Rule)
+		}
+	}
+}
+
+// flags is a nil-safe accessor for a Resolved's flags (a rejected resolve returns
+// a nil *Resolved), used only to enrich failure messages above.
+func flags(r *Resolved) []string {
+	if r == nil {
+		return nil
+	}
+	return r.Flags
+}
+
+func TestResolve_MaxNumSeqs_EmitsFlag(t *testing.T) {
+	r := req("qwen-36b-fp4")
+	r.MaxNumSeqs = 64
+	got, err := Resolve(r, qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if v := flagValue(got.Flags, "--max-num-seqs"); v != "64" {
+		t.Errorf("--max-num-seqs 64 must emit --max-num-seqs 64, got %q; flags=%v", v, got.Flags)
+	}
+}
+
+func TestResolve_MaxNumSeqs_Unset_OmitsFlag(t *testing.T) {
+	// Single-instance unchanged: the GB10 hardware default is unset, so a bare
+	// request emits no concurrency cap and vLLM keeps its own default.
+	got, err := Resolve(req("qwen-36b-fp4"), qwenFacts())
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if hasFlag(got.Flags, "--max-num-seqs") {
+		t.Errorf("an unset max-num-seqs on GB10 must NOT emit the flag; flags=%v", got.Flags)
+	}
+}
+
+func TestResolve_MaxNumSeqs_Negative_Rejected(t *testing.T) {
+	for _, bad := range []int{-1, -256} {
+		r := req("qwen-36b-fp4")
+		r.MaxNumSeqs = bad
+		_, err := Resolve(r, qwenFacts())
+		re, ok := AsRejection(err)
+		if !ok {
+			t.Fatalf("max-num-seqs %d must be rejected fail-closed, got %v", bad, err)
+		}
+		if re.Rule != "max-num-seqs-range" {
+			t.Errorf("max-num-seqs %d must fire the max-num-seqs-range rule, got %q", bad, re.Rule)
+		}
 	}
 }
 

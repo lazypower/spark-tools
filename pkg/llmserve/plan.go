@@ -22,7 +22,9 @@ type PlanRequest struct {
 	Facts        serving.ArtifactFacts
 	Capabilities []serving.Capability
 	ContextLen   int
-	Image        string // engine image digest/tag (also the target engine fingerprint)
+	GPUMemUtil   float64 // vLLM --gpu-memory-utilization fraction (0,1]; 0 = unset (hardware default, then vLLM's own)
+	MaxNumSeqs   int     // vLLM --max-num-seqs (max concurrent sequences); 0 = unset (hardware default, then vLLM's own)
+	Image        string  // engine image digest/tag (also the target engine fingerprint)
 	Accelerator  string // target accelerator fingerprint
 	Port         int    // host port (default 8000)
 	Mounts       []servespec.Mount
@@ -75,6 +77,8 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error)
 		ServedName:   served,
 		Capabilities: req.Capabilities,
 		ContextLen:   req.ContextLen,
+		GPUMemUtil:   req.GPUMemUtil,
+		MaxNumSeqs:   req.MaxNumSeqs,
 		Target:       fingerprint.Fingerprint{Engine: req.Image, Accelerator: req.Accelerator},
 	}
 	resolved, err := servecontract.Resolve(creq, facts)
