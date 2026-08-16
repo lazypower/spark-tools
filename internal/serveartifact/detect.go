@@ -155,6 +155,8 @@ func detectQuant(dir string, configJSON []byte) serving.QuantMethod {
 			return serving.QuantNVFP4
 		case "FP8":
 			return serving.QuantFP8
+		case "MIXED_PRECISION":
+			return serving.QuantModelOptMixed
 		default:
 			// ModelOpt with an algo we have not validated a flag policy for.
 			return unknownQuant("modelopt", info.Algo)

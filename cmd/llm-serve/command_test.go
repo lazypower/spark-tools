@@ -175,7 +175,8 @@ func TestProfilesCmd_Output(t *testing.T) {
 	}
 	out := buf.String()
 	// Must list known archs including the Qwen3.5 text arch and capabilities.
-	for _, want := range []string{"Qwen3MoeForCausalLM", "Qwen3_5MoeForConditionalGeneration", "capabilities:"} {
+	for _, want := range []string{"Qwen3MoeForCausalLM", "Qwen3_5MoeForConditionalGeneration",
+		"Qwen3_5ForConditionalGeneration", "capabilities:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("profiles output missing %q", want)
 		}

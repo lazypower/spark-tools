@@ -414,3 +414,67 @@ func TestResolve_StalenessWarning_WhenEngineDrifts(t *testing.T) {
 		t.Error("staleness is a warning, not a gate — flags must still be emitted")
 	}
 }
+
+// qwen36Facts is the Qwen3.6 NVFP4 shape the GB10 acceptance run was blocked on:
+// ModelOpt mixed precision (FP8 linear-attention + FP4 elsewhere) on a natively
+// multimodal Qwen3.5/3.6 arch. dense picks the 27B arch over the 35B-A3B MoE.
+func qwen36Facts(dense bool) serving.ArtifactFacts {
+	arch, path := "Qwen3_5MoeForConditionalGeneration", "/models/hf/Qwen3.6-35B-A3B-NVFP4"
+	if dense {
+		arch, path = "Qwen3_5ForConditionalGeneration", "/models/hf/Qwen3.6-27B-NVFP4"
+	}
+	return serving.ArtifactFacts{
+		ModelPath: path,
+		Arch:      arch,
+		Tokenizer: serving.TokenizerQwen,
+		Quant:     serving.QuantModelOptMixed,
+		HasVision: true,
+	}
+}
+
+func TestResolve_Qwen36MixedPrecision_NoQuantFlag(t *testing.T) {
+	// Both Qwen3.6 NVFP4 lines refused fail-closed before the mixed-precision
+	// policy existed: the MoE at unknown-quant, the dense at unknown-arch first.
+	for _, dense := range []bool{false, true} {
+		facts := qwen36Facts(dense)
+		got, err := Resolve(req("qwen36", serving.Vision, serving.GuidedDecoding), facts)
+		if err != nil {
+			t.Fatalf("%s: resolve: %v", facts.Arch, err)
+		}
+		if hasFlag(got.Flags, "--quantization") {
+			t.Errorf("%s: ModelOpt mixed precision is auto-detected and must NOT emit --quantization; flags=%v", facts.Arch, got.Flags)
+		}
+		if got.Key.Quant != serving.QuantModelOptMixed {
+			t.Errorf("%s: contract key must record the mixed-precision quant, got %q", facts.Arch, got.Key.Quant)
+		}
+		if len(got.Warnings) != 0 {
+			t.Errorf("%s: profiles are authored against this target, want no warnings, got %v", facts.Arch, got.Warnings)
+		}
+	}
+}
+
+func TestResolve_Qwen36_ToolCallingAndThinking(t *testing.T) {
+	// The dense 27B inherits the MoE line's parser contract.
+	got, err := Resolve(req("qwen36-27b", serving.Thinking, serving.ToolCalling), qwen36Facts(true))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if v := flagValue(got.Flags, "--reasoning-parser"); v != "qwen3" {
+		t.Errorf("--reasoning-parser = %q, want qwen3; flags=%v", v, got.Flags)
+	}
+	if v := flagValue(got.Flags, "--tool-call-parser"); v != "qwen3_coder" {
+		t.Errorf("--tool-call-parser = %q, want qwen3_coder; flags=%v", v, got.Flags)
+	}
+}
+
+func TestResolve_Qwen36_TextOnlyBuild_StillRejectsVision(t *testing.T) {
+	// The arch claims vision, but a build shipping no processor must still refuse:
+	// the claim is about the arch, the processor is about this artifact.
+	facts := qwen36Facts(true)
+	facts.HasVision = false
+	_, err := Resolve(req("qwen36-27b", serving.Vision), facts)
+	rej, ok := AsRejection(err)
+	if !ok || rej.Rule != "vision-requires-processor" {
+		t.Fatalf("want vision-requires-processor rejection, got %v", err)
+	}
+}

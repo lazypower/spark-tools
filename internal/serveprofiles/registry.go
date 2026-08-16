@@ -18,6 +18,23 @@ const seededProvenance = "run.sh MODEL_MAP + AGENTS.md (vllm-config), 2026-06"
 // verdict is the v2 probe's to stamp, not the author's.
 const vlAcceptanceProvenance = "on-box vision acceptance: Qwen3-VL-32B-Instruct-NVFP4, tensor-warden GB10, vLLM v0.23.0 (2026-07-08)"
 
+// qwen35VisionProvenance backs the Qwen3.5/3.6 vision claims. The evidence is
+// artifact metadata, not a serving acceptance: config.json for both the dense
+// and MoE builds carries vision_config, image_token_id, video_token_id and
+// vision_start/end_token_id, and the artifacts ship preprocessor_config.json,
+// processor_config.json and video_preprocessor_config.json. Weaker than
+// vlAcceptanceProvenance — the multimodal path has not been exercised on this
+// engine. The claim says the ARCH is multimodal; whether a given build ships the
+// processor stays the vision-requires-processor rule's call at resolution.
+const qwen35VisionProvenance = "artifact metadata: Qwen3.6 config.json vision_config + preprocessor/video_preprocessor configs (GB10 acceptance report, 2026-08-11); vision path not yet served on-box"
+
+// qwen35DenseProvenance backs the non-vision claims of the dense Qwen3.5/3.6
+// entry, inferred from its MoE sibling: the two lines share the Qwen3.5/3.6 chat
+// template and the same reasoning/tool parser contract. The dense arch has not
+// been served on this box at all, which is why it does not borrow the MoE
+// entry's run.sh provenance.
+const qwen35DenseProvenance = "family inference from Qwen3_5MoeForConditionalGeneration (same Qwen3.5/3.6 chat template + qwen3/qwen3_coder parser contract); dense arch not yet served on-box"
+
 // seededFingerprint is the GB10 Spark environment the v1 profiles were authored
 // against (AGENTS.md: image v0.23.0, GB10 / SM 12.1). The staleness check warns
 // when an operator emits for anything that diverges from this.
@@ -58,13 +75,19 @@ var builtins = []ArchProfile{
 			asserted(serving.Vision, true), // Qwen3.6 vision
 		},
 	},
-	// Qwen3.5/3.6 MoE text variants (run.sh qwen-35b / qwen-36b / qwen-36b-fp4 —
-	// the latter is the DEFAULT_MODEL). One entry unlocks all three: they report the
-	// same arch and differ only by quant, which the probe derives. Same Qwen3
-	// reasoning + qwen3_coder tool contract as the Qwen3 MoE family (Qwen tokenizer
-	// required, else the tool parser 500s), but TEXT-ONLY — distinct from the
-	// vision-capable Qwen3VLMoeForConditionalGeneration (note the absent "VL"), so it
-	// carries Vision:false and stands as its own profile rather than a Qwen3Moe alt.
+	// Qwen3.5/3.6 MoE variants (qwen-35b / qwen-36b / qwen-36b-fp4). One entry
+	// unlocks all three: they report the same arch and differ only by quant, which
+	// the probe derives. Same Qwen3 reasoning + qwen3_coder tool contract as the
+	// Qwen3 MoE family (Qwen tokenizer required, else the tool parser 500s).
+	//
+	// Vision was originally seeded false here on the reading that the absent "VL"
+	// in the arch name marked a text-only line, as it does for
+	// Qwen3VLMoeForConditionalGeneration. That reading was wrong: the Qwen3.5/3.6
+	// generation is natively multimodal, the ForConditionalGeneration suffix is
+	// itself the multimodal marker (a text-only Qwen arch is ForCausalLM), and the
+	// artifacts carry the vision config and processors. Corrected to true on the
+	// artifact evidence — see qwen35VisionProvenance for what that evidence is and
+	// is not.
 	{
 		Arch:                        "Qwen3_5MoeForConditionalGeneration",
 		ReasoningParser:             "qwen3",
@@ -74,7 +97,30 @@ var builtins = []ArchProfile{
 			asserted(serving.GuidedDecoding, true),
 			asserted(serving.Thinking, true),
 			asserted(serving.ToolCalling, true),
-			asserted(serving.Vision, false),
+			{Capability: serving.Vision, Supported: true, Status: StatusAsserted, Provenance: qwen35VisionProvenance},
+		},
+	},
+	// Qwen3.5/3.6 DENSE — config arch Qwen3_5ForConditionalGeneration (Qwen3.6-27B).
+	// The dense sibling of the MoE entry above, exactly as
+	// Qwen3VLForConditionalGeneration is the dense sibling of the VL MoE arch: same
+	// generation, same chat template, same parser contract, different expert
+	// topology. Kept as its own profile rather than an AltArch of the MoE entry
+	// because the claims carry different provenance — the MoE line is seeded from a
+	// working oracle, this one is inferred and unserved — and a probe (v2) will
+	// prove or drift the two independently.
+	//
+	// The NVFP4 build of this arch is ModelOpt mixed precision, not uniform NVFP4;
+	// that is a quant fact, resolved through QuantFlags, not an arch fact.
+	{
+		Arch:                        "Qwen3_5ForConditionalGeneration",
+		ReasoningParser:             "qwen3",
+		ToolCallParser:              "qwen3_coder",
+		ToolParserRequiresTokenizer: serving.TokenizerQwen,
+		Claims: []Claim{
+			{Capability: serving.GuidedDecoding, Supported: true, Status: StatusAsserted, Provenance: qwen35DenseProvenance},
+			{Capability: serving.Thinking, Supported: true, Status: StatusAsserted, Provenance: qwen35DenseProvenance},
+			{Capability: serving.ToolCalling, Supported: true, Status: StatusAsserted, Provenance: qwen35DenseProvenance},
+			{Capability: serving.Vision, Supported: true, Status: StatusAsserted, Provenance: qwen35VisionProvenance},
 		},
 	},
 	// Nemotron-H — trust-remote-code (ships *.py modeling modules); reasoning via
