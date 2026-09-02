@@ -68,3 +68,30 @@ func TestInfo_String_NilAndEmpty(t *testing.T) {
 		t.Errorf("nil Info should be 'none', got %q", nilInfo.String())
 	}
 }
+
+func TestParse_MixedPrecisionGroups_IsDeterministic(t *testing.T) {
+	// The Qwen3.6 NVFP4 shape: FP8 on the linear-attention projections (group_0),
+	// FP4 on the rest (group_1). config_groups is a map, so naming either single
+	// precision would vary run to run — and llm-serve keys its contract on the
+	// detected quant. Run it repeatedly so a lucky iteration order can't pass.
+	cfg := []byte(`{"quantization_config":{"quant_method":"modelopt","config_groups":{` +
+		`"group_0":{"weights":{"num_bits":8,"type":"float"}},` +
+		`"group_1":{"weights":{"num_bits":4,"type":"float"}}}}}`)
+	for i := 0; i < 32; i++ {
+		got := ParseQuant(cfg, nil, nil)
+		if got == nil || got.Method != "modelopt" || got.Algo != "MIXED_PRECISION" {
+			t.Fatalf("expected modelopt MIXED_PRECISION, got %+v", got)
+		}
+	}
+}
+
+func TestParse_AgreeingGroups_NameTheOnePrecision(t *testing.T) {
+	// Several groups at the same precision is not mixed precision.
+	cfg := []byte(`{"quantization_config":{"quant_method":"compressed-tensors","config_groups":{` +
+		`"group_0":{"weights":{"num_bits":4,"type":"float"}},` +
+		`"group_1":{"weights":{"num_bits":4,"type":"float"}}}}}`)
+	got := ParseQuant(cfg, nil, nil)
+	if got == nil || got.Algo != "FP4" {
+		t.Fatalf("expected FP4, got %+v", got)
+	}
+}

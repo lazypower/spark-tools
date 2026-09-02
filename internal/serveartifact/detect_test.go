@@ -134,3 +134,26 @@ func TestDetectFacts_UnknownQuant_NotDowngraded(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectFacts_Qwen36MixedPrecision(t *testing.T) {
+	// Qwen3.6-27B-NVFP4: ModelOpt writes quant_algo MIXED_PRECISION because the
+	// checkpoint is FP8 on the linear-attention path and FP4 elsewhere. It must
+	// resolve to the mixed-precision method — not fall through to the unknown
+	// label (which fails the launch closed) and not collapse to plain NVFP4.
+	dir := t.TempDir()
+	writeFile(t, dir, "config.json", `{"architectures":["Qwen3_5ForConditionalGeneration"],"model_type":"qwen3_5"}`)
+	writeFile(t, dir, "hf_quant_config.json", `{"quantization":{"quant_algo":"MIXED_PRECISION","kv_cache_quant_algo":"FP8"}}`)
+	writeFile(t, dir, "tokenizer_config.json", `{"tokenizer_class":"Qwen2Tokenizer"}`)
+	writeFile(t, dir, "preprocessor_config.json", `{}`)
+
+	facts, err := DetectFacts(dir)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if facts.Quant != serving.QuantModelOptMixed {
+		t.Errorf("quant = %q, want %q", facts.Quant, serving.QuantModelOptMixed)
+	}
+	if !facts.HasVision {
+		t.Error("the artifact ships a multimodal processor, HasVision must be true")
+	}
+}

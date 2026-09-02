@@ -56,6 +56,13 @@ const (
 	QuantCompressedTensors QuantMethod = "compressed-tensors"
 	// QuantFP8 is FP8 weights/KV — auto-detected, needs no flag.
 	QuantFP8 QuantMethod = "fp8"
+	// QuantModelOptMixed is ModelOpt mixed precision (hf_quant_config.json
+	// quant_algo MIXED_PRECISION): one checkpoint carrying more than one weight
+	// precision, e.g. the Qwen3.6 NVFP4 builds, which quantize the linear-attention
+	// projections to FP8 and the rest to FP4. It is a distinct method from
+	// QuantNVFP4 because the checkpoint is not uniformly NVFP4 — collapsing it
+	// would lose the fact the contract key is validated against.
+	QuantModelOptMixed QuantMethod = "modelopt-mixed-precision"
 )
 
 // TokenizerFamily identifies the tokenizer/processor an artifact ships, detected

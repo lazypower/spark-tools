@@ -71,15 +71,10 @@ func ParseQuant(configJSON, hfQuantJSON, gptqJSON []byte) *QuantInfo {
 	if len(configJSON) > 0 {
 		var cfg struct {
 			QuantizationConfig *struct {
-				QuantMethod  string `json:"quant_method"`
-				Bits         int    `json:"bits"`
-				Format       string `json:"format"`
-				ConfigGroups map[string]struct {
-					Weights struct {
-						NumBits int    `json:"num_bits"`
-						Type    string `json:"type"`
-					} `json:"weights"`
-				} `json:"config_groups"`
+				QuantMethod   string                 `json:"quant_method"`
+				Bits          int                    `json:"bits"`
+				Format        string                 `json:"format"`
+				ConfigGroups  map[string]configGroup `json:"config_groups"`
 				KVCacheScheme *struct {
 					NumBits int    `json:"num_bits"`
 					Type    string `json:"type"`
@@ -93,16 +88,7 @@ func ParseQuant(configJSON, hfQuantJSON, gptqJSON []byte) *QuantInfo {
 			case qc.Bits > 0:
 				info.Algo = fmt.Sprintf("W%dA16", qc.Bits)
 			case len(qc.ConfigGroups) > 0:
-				for _, g := range qc.ConfigGroups {
-					if g.Weights.NumBits > 0 {
-						if strings.Contains(strings.ToLower(g.Weights.Type), "float") {
-							info.Algo = fmt.Sprintf("FP%d", g.Weights.NumBits)
-						} else {
-							info.Algo = fmt.Sprintf("W%dA16", g.Weights.NumBits)
-						}
-						break
-					}
-				}
+				info.Algo = groupsAlgo(qc.ConfigGroups)
 			}
 			if qc.KVCacheScheme != nil && qc.KVCacheScheme.NumBits == 8 &&
 				strings.Contains(strings.ToLower(qc.KVCacheScheme.Type), "float") {
@@ -116,4 +102,41 @@ func ParseQuant(configJSON, hfQuantJSON, gptqJSON []byte) *QuantInfo {
 	}
 
 	return nil
+}
+
+// configGroup is one entry of a quantization_config config_groups map: a set of
+// targets sharing one weight precision. A checkpoint with several groups may
+// quantize them differently — see groupsAlgo.
+type configGroup struct {
+	Weights struct {
+		NumBits int    `json:"num_bits"`
+		Type    string `json:"type"`
+	} `json:"weights"`
+}
+
+// groupsAlgo names the weight precision described by a config_groups map.
+// Groups that agree yield that one precision ("FP4", "W4A16"). Groups that
+// DISAGREE are a mixed-precision checkpoint — e.g. the Qwen3.6 NVFP4 builds,
+// which put the linear-attention projections in FP8 and everything else in FP4 —
+// and are named MIXED_PRECISION, matching the quant_algo ModelOpt writes into
+// hf_quant_config.json for the same checkpoint. Reporting either single
+// precision there would be a coin flip (config_groups is a map, so iteration
+// order is random) and would understate a checkpoint that is not uniformly
+// quantized. Returns "" when no group declares a weight width.
+func groupsAlgo(groups map[string]configGroup) string {
+	algo := ""
+	for _, g := range groups {
+		if g.Weights.NumBits == 0 {
+			continue
+		}
+		name := fmt.Sprintf("W%dA16", g.Weights.NumBits)
+		if strings.Contains(strings.ToLower(g.Weights.Type), "float") {
+			name = fmt.Sprintf("FP%d", g.Weights.NumBits)
+		}
+		if algo != "" && algo != name {
+			return "MIXED_PRECISION"
+		}
+		algo = name
+	}
+	return algo
 }

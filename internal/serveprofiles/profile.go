@@ -95,6 +95,15 @@ var QuantFlags = map[serving.QuantMethod][]string{
 	serving.QuantFP8:               nil,
 	serving.QuantCompressedTensors: nil,
 	serving.QuantGPTQ:              {"--quantization", "moe_wna16"},
+	// ModelOpt mixed precision (Qwen3.6 NVFP4 builds: FP8 on the linear-attention
+	// projections, FP4 on the rest). No flag, on the same auto-detect basis as the
+	// uniform ModelOpt entries above: vLLM reads quantization_config off the
+	// checkpoint. NVIDIA's model card also documents an explicit
+	// `--quantization modelopt`; auto-detect is the variant with on-box precedent
+	// (the Qwen3.6-35B-A3B-NVFP4 checkpoint serves this way), which is why the
+	// no-flag policy is the one seeded here. Asserted, not accepted on-box: this
+	// entry was authored from the artifact metadata, not from a completed launch.
+	serving.QuantModelOptMixed: nil,
 }
 
 // QuantFlagsFor returns the launch flags for a quant method and whether the

@@ -17,6 +17,7 @@ func TestQuantFlagsFor_KnownMethods(t *testing.T) {
 		{serving.QuantCompressedTensors, nil},
 		{serving.QuantNone, nil},
 		{serving.QuantGPTQ, []string{"--quantization", "moe_wna16"}},
+		{serving.QuantModelOptMixed, nil},
 	}
 	for _, c := range cases {
 		got, ok := QuantFlagsFor(c.q)
@@ -45,15 +46,28 @@ func TestLookup_CanonicalAndAlt(t *testing.T) {
 	if _, ok := Lookup("NopeForCausalLM"); ok {
 		t.Error("unknown arch must not resolve")
 	}
-	// Qwen3.5/3.6 MoE text arch (run.sh DEFAULT_MODEL qwen-36b-fp4 + qwen-36b/35b)
-	// must resolve, and as a text-only profile must NOT claim vision.
-	q35, ok := Lookup("Qwen3_5MoeForConditionalGeneration")
-	if !ok {
-		t.Fatal("Qwen3.5 MoE arch (DEFAULT_MODEL) must resolve to a profile")
-	}
-	for _, cl := range q35.Claims {
-		if cl.Capability == serving.Vision && cl.Supported {
-			t.Error("Qwen3.5 MoE is text-only — vision must not be claimed")
+	// Both Qwen3.5/3.6 lines must resolve — the MoE (qwen-36b-fp4 / qwen-36b /
+	// qwen-35b) and the dense (Qwen3.6-27B). The generation is natively
+	// multimodal, so both claim vision; a build that ships no processor is caught
+	// per-artifact by the vision-requires-processor rule, not by the arch claim.
+	for _, arch := range []string{"Qwen3_5MoeForConditionalGeneration", "Qwen3_5ForConditionalGeneration"} {
+		p, ok := Lookup(arch)
+		if !ok {
+			t.Fatalf("%s must resolve to a profile", arch)
+		}
+		if !p.Supports(serving.Vision) {
+			t.Errorf("%s: Qwen3.5/3.6 is natively multimodal — vision must be claimed", arch)
+		}
+		for _, c := range []serving.Capability{serving.GuidedDecoding, serving.Thinking, serving.ToolCalling} {
+			if !p.Supports(c) {
+				t.Errorf("%s: dense and MoE share the Qwen3.5/3.6 contract — %s must be claimed", arch, c)
+			}
+		}
+		if p.ToolCallParser != "qwen3_coder" || p.ToolParserRequiresTokenizer != serving.TokenizerQwen {
+			t.Errorf("%s: tool calling must go through the tokenizer-gated qwen3_coder parser", arch)
+		}
+		if p.ReasoningParser != "qwen3" {
+			t.Errorf("%s: thinking must go through the qwen3 reasoning parser", arch)
 		}
 	}
 	// GLM-4.7-Flash (Glm4MoeLite) must resolve to the GLM profile, not be refused.
