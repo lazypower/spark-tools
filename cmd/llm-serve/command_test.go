@@ -321,9 +321,9 @@ func TestEmitCmd_GPUMemUtil(t *testing.T) {
 		for _, bad := range [][]string{
 			{"--gpu-mem-util", "1.5"},
 			{"--gpu-mem-util", "NaN"},
-			{"--gpu-mem-util", "0"}, // explicit 0: the resolver's unset sentinel is blind to it — CLI must reject
+			{"--gpu-mem-util", "0"},   // explicit 0: the resolver's unset sentinel is blind to it — CLI must reject
 			{"--max-num-seqs", "-1"},
-			{"--max-num-seqs", "0"}, // explicit 0: not a positive count, must fail closed not silently default
+			{"--max-num-seqs", "0"},   // explicit 0: not a positive count, must fail closed not silently default
 		} {
 			cmd := emitCmd()
 			var out, errb bytes.Buffer

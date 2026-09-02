@@ -173,9 +173,10 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
+	enforceEager, eagerWarnings := resolveEnforceEager(req)
 
 	// 5. Realize flags.
-	flags := assembleFlags(req, facts, profile, quantFlags, gpuMemUtil, maxNumSeqs)
+	flags := assembleFlags(req, facts, profile, quantFlags, gpuMemUtil, maxNumSeqs, enforceEager)
 
 	// 6. Contract key.
 	key := serving.ContractKey{
@@ -202,6 +203,7 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	// concern (a distinct authored assumption from the arch flags above).
 	warnings = append(warnings, gpuWarnings...)
 	warnings = append(warnings, seqWarnings...)
+	warnings = append(warnings, eagerWarnings...)
 
 	return &Resolved{Key: key, Flags: flags, Warnings: warnings}, nil
 }
@@ -264,6 +266,28 @@ func resolveMaxNumSeqs(req Request) (n int, warnings []string, err error) {
 	return hw.MaxNumSeqs, warnings, nil
 }
 
+// resolveEnforceEager reports whether the target accelerator requires eager
+// execution. Unlike the budget levers there is no request-side override: this is
+// not a preference the caller tunes but a statement about what the accelerator's
+// runtime survives, and an operator who needs to override it can drop the
+// accelerator's hardware profile rather than silently re-enable a known crash.
+//
+// The flag is still emitted when the authored environment has drifted, with the
+// re-verify warning attached. Eager execution is the fail-safe direction — it
+// costs throughput, while the alternative is an engine that dies — so drift
+// prompts a human to re-check rather than silently withdrawing the guard.
+func resolveEnforceEager(req Request) (bool, []string) {
+	hw, ok := serveprofiles.LookupHardware(req.Target.Accelerator)
+	if !ok || !hw.EnforceEager {
+		return false, nil
+	}
+	var warnings []string
+	if drift := fingerprint.Drift(req.Target, hw.AuthoredAgainst); len(drift) > 0 {
+		warnings = append(warnings, hwStalenessWarning("enforce-eager", req.Target.Accelerator, hw.AuthoredAgainst, drift))
+	}
+	return true, warnings
+}
+
 // stalenessWarning renders the loud, dated "asserted + stale — re-verify" notice
 // for a profile whose authored environment differs from the emit target.
 func stalenessWarning(arch string, stamped fingerprint.Fingerprint, drift []string) string {
@@ -289,7 +313,7 @@ func hwStalenessWarning(knob, accelerator string, stamped fingerprint.Fingerprin
 // assembleFlags builds the ordered vLLM flag list from the validated request.
 // Order mirrors the working oracle's compose command so an emitted spec reads
 // like the hand-rolled one it replaces.
-func assembleFlags(req Request, facts serving.ArtifactFacts, profile serveprofiles.ArchProfile, quantFlags []string, gpuMemUtil float64, maxNumSeqs int) []string {
+func assembleFlags(req Request, facts serving.ArtifactFacts, profile serveprofiles.ArchProfile, quantFlags []string, gpuMemUtil float64, maxNumSeqs int, enforceEager bool) []string {
 	wants := func(c serving.Capability) bool {
 		return slices.Contains(req.Capabilities, c)
 	}
@@ -315,6 +339,12 @@ func assembleFlags(req Request, facts serving.ArtifactFacts, profile serveprofil
 	}
 	if maxNumSeqs > 0 {
 		flags = append(flags, "--max-num-seqs", fmt.Sprintf("%d", maxNumSeqs))
+	}
+	// Eager execution belongs with the resource group: it is what the
+	// accelerator's runtime can survive, and it zeroes the graph-capture term
+	// of the memory budget.
+	if enforceEager {
+		flags = append(flags, "--enforce-eager")
 	}
 
 	// Thinking → reasoning parser + enable_thinking. Without it, the reasoning
