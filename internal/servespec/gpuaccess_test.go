@@ -187,3 +187,116 @@ func TestRenderers_NVIDIANoGroupWarning(t *testing.T) {
 		}
 	}
 }
+
+// --- container engine ---
+
+func podmanHost() Host {
+	h := amdHost()
+	h.ContainerEngine = "podman"
+	return h
+}
+
+// Rootless podman needs keep-groups; naming groups there yields a GPU-less
+// container. A spec rendered FOR podman must carry the form that works.
+func TestDockerRun_PodmanRendersKeepGroups(t *testing.T) {
+	out := DockerRun(resolvedFixture(), podmanHost())
+
+	if !strings.Contains(out, "--group-add keep-groups") {
+		t.Errorf("podman spec must use keep-groups\n%s", out)
+	}
+	if strings.Contains(out, "--group-add video") {
+		t.Errorf("podman spec must not name groups\n%s", out)
+	}
+	// The command word must match the flags, or the line is not runnable as
+	// printed: docker rejects keep-groups.
+	if !strings.HasPrefix(strings.TrimSpace(stripComments(out)), "podman run -d") {
+		t.Errorf("podman spec must invoke podman, not docker\n%s", out)
+	}
+	// A spec that already carries the working form has nothing to warn about.
+	if strings.Contains(out, "STARTS SUCCESSFULLY AND RUNS THE ENGINE WITH NO GPU") {
+		t.Errorf("a podman-rendered spec must not carry the docker-form warning\n%s", out)
+	}
+}
+
+func TestCompose_PodmanRendersKeepGroups(t *testing.T) {
+	out := Compose(resolvedFixture(), podmanHost())
+	if !strings.Contains(out, "- keep-groups") {
+		t.Errorf("podman compose must use keep-groups\n%s", out)
+	}
+	if strings.Contains(out, "- video") {
+		t.Errorf("podman compose must not name groups\n%s", out)
+	}
+}
+
+// An unset engine must render exactly what it always did.
+func TestDockerRun_UnsetEngineIsDocker(t *testing.T) {
+	out := DockerRun(resolvedFixture(), amdHost())
+	if !strings.Contains(out, "--group-add video --group-add render") {
+		t.Errorf("unset engine must keep the historical docker form\n%s", out)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(stripComments(out)), "docker run -d") {
+		t.Errorf("unset engine must invoke docker\n%s", out)
+	}
+}
+
+// stripComments drops the leading warning-comment block so the first real line
+// can be asserted.
+func stripComments(s string) string {
+	var keep []string
+	for _, l := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			keep = append(keep, l)
+		}
+	}
+	return strings.Join(keep, "\n")
+}
+
+// --- engine command prefix ---
+
+// The official vllm image sets ENTRYPOINT ["vllm","serve"], but an image with an
+// empty entrypoint makes the runtime try to exec "--model" as a program. The
+// prefix is what makes such an image launchable.
+func TestDockerRun_CommandPrefixPrecedesFlags(t *testing.T) {
+	h := podmanHost()
+	h.Command = []string{"vllm", "serve"}
+	out := stripComments(DockerRun(resolvedFixture(), h))
+
+	img := strings.Index(out, h.Image)
+	vllm := strings.Index(out, "vllm")
+	model := strings.Index(out, "--model")
+	if img < 0 || vllm < 0 || model < 0 {
+		t.Fatalf("expected image, command and flags in output\n%s", out)
+	}
+	if !(img < vllm && vllm < model) {
+		t.Errorf("command prefix must sit between the image and the flags (img=%d cmd=%d model=%d)\n%s", img, vllm, model, out)
+	}
+}
+
+// Empty Command must leave the official-image path untouched, hash included.
+func TestSpecHash_EmptyCommandUnchanged(t *testing.T) {
+	withEmpty := nvidiaHost()
+	withNil := nvidiaHost()
+	withNil.Command = nil
+	if SpecHash(resolvedFixture(), withEmpty) != SpecHash(resolvedFixture(), withNil) {
+		t.Error("an empty command prefix must not change the spec hash")
+	}
+}
+
+// A command prefix changes what actually launches, so it must change identity.
+func TestSpecHash_CommandPrefixChangesHash(t *testing.T) {
+	base := podmanHost()
+	pref := podmanHost()
+	pref.Command = []string{"vllm", "serve"}
+	if SpecHash(resolvedFixture(), base) == SpecHash(resolvedFixture(), pref) {
+		t.Error("a command prefix must produce a distinct spec hash")
+	}
+}
+
+func TestQuadlet_CommandPrefixInExec(t *testing.T) {
+	h := podmanHost()
+	h.Command = []string{"vllm", "serve"}
+	out := Quadlet(resolvedFixture(), h)
+	if !strings.Contains(out, "Exec=vllm serve --model") {
+		t.Errorf("quadlet Exec must start with the command prefix\n%s", out)
+	}
+}
