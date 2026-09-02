@@ -38,6 +38,22 @@ type CompletionRequest struct {
 type Message struct {
 	Role    string `json:"role"` // "system", "user", "assistant"
 	Content string `json:"content"`
+	// Reasoning carries a thinking model's separated reasoning. Servers disagree
+	// on the key: vLLM 0.28 returns "reasoning", while other engines (and older
+	// vLLM) use "reasoning_content". Both are accepted so the text is not
+	// silently discarded against whichever server is on the other end -- dropping
+	// it loses a large fraction of what the model produced, and any token
+	// accounting built on this struct is wrong by that much.
+	Reasoning        string `json:"reasoning,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+// ReasoningText returns whichever reasoning field the server populated.
+func (m Message) ReasoningText() string {
+	if m.Reasoning != "" {
+		return m.Reasoning
+	}
+	return m.ReasoningContent
 }
 
 // ChatCompletionResponse is the non-streaming response.
