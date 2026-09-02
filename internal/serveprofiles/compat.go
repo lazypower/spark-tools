@@ -56,6 +56,14 @@ type CompatRule struct {
 	Remedy string
 }
 
+// nvidiaNativeQuants lists the quantization methods whose kernels exist only on
+// NVIDIA silicon. Adding a vendor-specific quant term to the vocabulary means
+// adding it here too, or the accelerator gate silently stops covering it.
+var nvidiaNativeQuants = []serving.QuantMethod{
+	serving.QuantNVFP4,
+	serving.QuantModelOptMixed,
+}
+
 // CompatRules is the v1 request-validation rule set, evaluated at resolution;
 // any violation rejects the request (no partial/footgun launch). It holds the
 // three production failure classes the campaign learned the hard way plus the
@@ -64,28 +72,36 @@ type CompatRule struct {
 // artifact can't actually serve must reject, not silently emit a server that
 // lacks it.
 var CompatRules = []CompatRule{
-	// NVFP4 is NVIDIA's FP4 format and its vLLM kernels are CUDA-only (Blackwell
-	// native FP4). Pointing an NVFP4 artifact at a non-NVIDIA accelerator emits a
-	// launch that cannot load the weights at all — the vendor is in the name of
-	// the format. Reject rather than hand the operator a spec that dies at load.
+	// Quantization methods whose vLLM kernels are NVIDIA-only. Pointing one of
+	// these artifacts at a non-NVIDIA accelerator emits a launch that cannot load
+	// the weights at all, and the spec looks valid right up to that point.
 	//
-	// Deliberately scoped to NVFP4 and nothing else. FP8 is NOT gated here even
-	// though gfx1151 has no native FP8: "unverified on this accelerator" is not
-	// the same claim as "cannot work", vLLM has non-native FP8 paths, and
-	// blocking on an untested hypothesis would be the same error as encoding a
-	// guessed memory ceiling. If someone measures FP8 failing on a given
-	// accelerator, that measurement is what earns a rule here.
+	//   - NVFP4 is NVIDIA's FP4: Blackwell-native, CUDA-only kernels. The vendor
+	//     is in the name of the format.
+	//   - ModelOpt MIXED_PRECISION is the same family wearing a different term.
+	//     ModelOpt is NVIDIA's own quantization toolkit, and the shipped
+	//     checkpoints (the Qwen3.6 NVFP4 builds) are FP4 weights with FP8
+	//     linear-attention projections. It is a distinct METHOD from NVFP4 --
+	//     which is why it is a separate vocabulary term -- but not a distinct
+	//     vendor, so gating only NVFP4 would let the same footgun through under
+	//     the newer name.
+	//
+	// Deliberately does NOT include plain FP8. gfx1151 has no native FP8, but
+	// "unverified on this accelerator" is not the claim "cannot work": vLLM has
+	// non-native FP8 paths, and blocking on an untested hypothesis would be the
+	// same error as encoding a guessed memory ceiling. A measurement showing FP8
+	// failing is what earns a rule here; a suspicion does not.
 	{
-		Name: "nvfp4-requires-nvidia",
+		Name: "nvidia-native-quant-requires-nvidia",
 		Violated: func(r CompatRequest) (bool, string) {
-			if r.Facts.Quant != serving.QuantNVFP4 {
+			if !slices.Contains(nvidiaNativeQuants, r.Facts.Quant) {
 				return false, ""
 			}
 			v := r.acceleratorVendor()
 			if v == "" || v == "nvidia" {
 				return false, ""
 			}
-			return true, fmt.Sprintf("artifact is NVFP4 (NVIDIA-native FP4, CUDA-only kernels) but the target accelerator %q is %s", r.Target.Accelerator, v)
+			return true, fmt.Sprintf("artifact quantization %q has NVIDIA-only kernels but the target accelerator %q is %s", r.Facts.Quant, r.Target.Accelerator, v)
 		},
 		Remedy: "serve a bf16/fp16 or vendor-neutral quantization on this accelerator, or emit for an NVIDIA target",
 	},

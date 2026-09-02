@@ -84,7 +84,37 @@ func TestResolve_NVFP4OnAMD_NamesTheRule(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a rejection, got %v", err)
 	}
-	if rej.Rule != "nvfp4-requires-nvidia" {
-		t.Errorf("rule = %q, want nvfp4-requires-nvidia", rej.Rule)
+	if rej.Rule != "nvidia-native-quant-requires-nvidia" {
+		t.Errorf("rule = %q, want nvidia-native-quant-requires-nvidia", rej.Rule)
+	}
+}
+
+// mixedPrecisionFacts is a ModelOpt MIXED_PRECISION checkpoint -- the Qwen3.6
+// NVFP4 builds, FP8 linear-attention projections with the rest at FP4. It is a
+// distinct quant method from QuantNVFP4 but the same NVIDIA-native family, so
+// it must not load on AMD either.
+func mixedPrecisionFacts() serving.ArtifactFacts {
+	f := nvfp4Facts()
+	f.Quant = serving.QuantModelOptMixed
+	return f
+}
+
+func TestResolve_MixedPrecisionNVFP4OnAMD_IsRejected(t *testing.T) {
+	amd := fingerprint.Fingerprint{
+		Engine:      "kyuz0/vllm-therock-gfx1151@0.28.0+strix",
+		Accelerator: "amd:strix-halo:gfx1151",
+	}
+	_, err := Resolve(Request{ServedName: "m", Target: amd}, mixedPrecisionFacts())
+	if err == nil {
+		t.Fatal("a ModelOpt mixed-precision NVFP4 checkpoint must be rejected on AMD: FP4+FP8 ModelOpt kernels are NVIDIA-native")
+	}
+	if _, ok := AsRejection(err); !ok {
+		t.Fatalf("expected a RejectionError, got %v", err)
+	}
+}
+
+func TestResolve_MixedPrecisionOnNVIDIA_IsAllowed(t *testing.T) {
+	if _, err := Resolve(req("m"), mixedPrecisionFacts()); err != nil {
+		t.Fatalf("mixed-precision NVFP4 on NVIDIA must resolve: %v", err)
 	}
 }
