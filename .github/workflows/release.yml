@@ -125,6 +125,12 @@ jobs:
     name: Publish release
     needs: [resolve, build]
     runs-on: ubuntu-latest
+    # gh resolves the target repo from a git remote. This job has no checkout,
+    # so name the repo explicitly or every gh call dies on "not a git repository".
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -133,13 +139,11 @@ jobs:
           path: dist
 
       - name: Verify archive set
-        env:
-          VERSION: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           cd dist
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            archive="spark-tools-${VERSION}-${platform}.tar.gz"
+            archive="spark-tools-${TAG}-${platform}.tar.gz"
             if [ ! -s "${archive}" ]; then
               echo "::error::missing archive ${archive}"
               exit 1
@@ -149,9 +153,6 @@ jobs:
           cat checksums.txt
 
       - name: Create or reuse release
-        env:
-          TAG: ${{ needs.resolve.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if gh release view "${TAG}" >/dev/null 2>&1; then
@@ -164,9 +165,6 @@ jobs:
           fi
 
       - name: Upload assets
-        env:
-          TAG: ${{ needs.resolve.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
