@@ -37,12 +37,15 @@ const qwen35DenseProvenance = "family inference from Qwen3_5MoeForConditionalGen
 
 // qwen3CausalProvenance marks the Qwen3ForCausalLM (plain dense text) entry.
 // Distinct from qwen35DenseProvenance above, which backs the Qwen3.5/3.6 dense
-// ForConditionalGeneration line, whose claims are derived
-// from the ARTIFACT ITSELF -- the chat template shipped in tokenizer_config.json
-// -- rather than from run.sh or an on-box acceptance. That is weaker evidence
-// than serving the model, and deliberately recorded as such: the template proves
-// what the model is built to do, not that this engine build realizes it.
-const qwen3CausalProvenance = "Qwen3 dense chat template (tokenizer_config.json): enable_thinking + <think>, Hermes-format <tool_call> tags, no vision config; static artifact analysis on gfx1151, not exercised on-box (2026-09-02)"
+// ForConditionalGeneration line.
+//
+// The claims began as artifact analysis -- the chat template shipped in
+// tokenizer_config.json -- and the parser choices were then EXERCISED on-box
+// against a live engine, which is what upgraded this from a reading of the
+// template to a measurement. Still `asserted` per §8.0: a manual acceptance is
+// strong evidence, but the `proven` verdict belongs to the v2 probe, not the
+// author.
+const qwen3CausalProvenance = "on-box acceptance, gfx1151 / vLLM 0.28.0+strix (2026-09-02): hermes parser returned a structured tool_call (finish_reason tool_calls, no tag leakage, no misfire without tools); qwen3 reasoning parser separated 4736 chars into message.reasoning with the answer clean in content. Vision:false remains artifact-derived (config carries no vision or image keys)"
 
 // qwen3CausalFingerprint is the environment the Qwen3ForCausalLM entry was authored
 // on. It is NOT the repo-wide seed, because these claims were not authored
@@ -218,13 +221,22 @@ var builtins = []ArchProfile{
 	// <function=name><parameter=...> XML instead, so inheriting the MoE profile
 	// here would hand vLLM a parser that cannot read this model's output.
 	//
-	// Evidence is the artifact's own chat template, not a serving run: thinking
-	// and tool-calling are asserted because the template implements them, and
-	// vision is false because the config carries no vision or image keys at all.
-	// Per §8.0 that makes them hypotheses (`asserted`), which is exactly what the
-	// status means -- but they have NOT been exercised against a live engine, so
-	// the first operator to serve tools on this arch should confirm before
-	// trusting the parser choice.
+	// The parser choices are MEASURED, not inferred. Serving Qwen3-1.7B on
+	// gfx1151 with the flags this entry produces: hermes returned a structured
+	// tool_call with finish_reason "tool_calls" and no tag leakage into content,
+	// and did not misfire on a request carrying no tools; the qwen3 reasoning
+	// parser separated the think block into message.reasoning (4736 chars,
+	// reasoning_tokens 1348) leaving a clean answer in content.
+	//
+	// Note for anyone reading the response: this engine returns the separated
+	// reasoning as `reasoning`, NOT the older `reasoning_content` key. Looking
+	// for the wrong field makes a working parser look like it silently drops
+	// the model's thinking.
+	//
+	// Vision:false is still artifact-derived rather than measured -- the config
+	// carries no vision or image keys at all, so there is nothing to serve.
+	// Per §8.0 every claim here stays `asserted`: a manual acceptance is strong
+	// evidence, but the `proven` verdict is the v2 probe's to stamp.
 	{
 		Arch:            "Qwen3ForCausalLM",
 		AuthoredAgainst: qwen3CausalFingerprint,
