@@ -3,6 +3,7 @@ package syscheck
 import (
 	"context"
 	"fmt"
+	"github.com/lazypower/spark-tools/pkg/llmrun/engine"
 	"os"
 	"os/exec"
 	"runtime"
@@ -65,13 +66,23 @@ func (c ResourceCheck) Run(_ context.Context) CheckResult {
 		}
 	}
 
-	// Check for llama.cpp binaries
-	if _, err := exec.LookPath("llama-server"); err != nil {
+	// Check for llama.cpp binaries using the ENGINE's own resolution rather
+	// than a bare PATH lookup.
+	//
+	// A plain exec.LookPath disagrees with the thing that actually launches the
+	// server: engine.DetectBinaries honors LLM_RUN_LLAMA_DIR and searches the
+	// common install locations, so a perfectly working configuration -- the
+	// binary present but not on PATH, which is the normal shape when llama.cpp
+	// lives in a container image at /app -- failed pre-flight while llm-run
+	// itself could run the model fine. Two rules for "is llama.cpp here" is one
+	// too many; this defers to the one that launches.
+	caps, err := engine.DetectBinaries(os.Getenv("LLM_RUN_LLAMA_DIR"))
+	if err != nil {
 		result.Failed = true
-		result.Message = "llama-server not found in PATH"
+		result.Message = "llama-server not found (set LLM_RUN_LLAMA_DIR or put it on PATH)"
 		return result
 	}
-	messages = append(messages, "llama-server found")
+	messages = append(messages, fmt.Sprintf("llama-server found (%s, backend %s)", caps.BinaryDir, caps.Backend))
 
 	result.Message = strings.Join(messages, "; ")
 	return result
