@@ -3,25 +3,101 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. v0.4.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+# One release run per tag. A web-created release fires both `push` and
+# `release`; the later run supersedes the earlier one.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
-  release:
+  resolve:
+    name: Resolve tag
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      stable: ${{ steps.tag.outputs.stable }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Resolve and verify tag
+        id: tag
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${RAW_TAG}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'${TAG}' is not a release tag (want vMAJOR.MINOR.PATCH[-prerelease])"
+            exit 1
+          fi
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::tag ${TAG} does not exist on the remote"
+            exit 1
+          fi
+          if [[ "${TAG}" == *-* ]]; then
+            STABLE=false
+          else
+            STABLE=true
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "stable=${STABLE}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG} (stable=${STABLE})"
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25"
 
-      - name: Build all platforms
+      - name: Download modules
         run: |
-          VERSION=${GITHUB_REF_NAME}
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if go mod download; then exit 0; fi
+            echo "::warning::go mod download failed (attempt ${attempt}/3)"
+            sleep $((attempt * 10))
+          done
+          echo "::error::go mod download failed after 3 attempts"
+          exit 1
+
+      - name: Build archive
+        env:
+          VERSION: ${{ needs.resolve.outputs.tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           LDFLAGS="-s -w \
@@ -29,55 +105,127 @@ jobs:
             -X github.com/lazypower/spark-tools/internal/version.Commit=${COMMIT} \
             -X github.com/lazypower/spark-tools/internal/version.Date=${DATE}"
 
-          platforms=(
-            "linux/amd64"
-            "linux/arm64"
-            "darwin/amd64"
-            "darwin/arm64"
-          )
-
-          for platform in "${platforms[@]}"; do
-            GOOS="${platform%/*}"
-            GOARCH="${platform#*/}"
-            dir="dist/spark-tools-${VERSION}-${GOOS}-${GOARCH}"
-            mkdir -p "${dir}"
-
-            for bin in hfetch llm-run llm-serve llm-chat llm-bench llm-tidy; do
-              echo "Building ${bin} for ${GOOS}/${GOARCH}"
-              CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
-                go build -ldflags "${LDFLAGS}" -o "${dir}/${bin}" "./cmd/${bin}"
-            done
-
-            cp LICENSE "${dir}/"
-            tar -czf "${dir}.tar.gz" -C dist "spark-tools-${VERSION}-${GOOS}-${GOARCH}"
+          dir="dist/spark-tools-${VERSION}-${GOOS}-${GOARCH}"
+          mkdir -p "${dir}"
+          for bin in hfetch llm-run llm-serve llm-chat llm-bench llm-tidy; do
+            echo "Building ${bin} for ${GOOS}/${GOARCH}"
+            CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "${dir}/${bin}" "./cmd/${bin}"
           done
+          cp LICENSE "${dir}/"
+          tar -czf "${dir}.tar.gz" -C dist "spark-tools-${VERSION}-${GOOS}-${GOARCH}"
 
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz > checksums.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+          if-no-files-found: error
 
-      - name: Create release
-        run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            dist/*.tar.gz \
-            dist/checksums.txt
+  publish:
+    name: Publish release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify archive set
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update Homebrew tap
-        if: "!contains(github.ref_name, '-')"
+          VERSION: ${{ needs.resolve.outputs.tag }}
         run: |
-          VERSION=${GITHUB_REF_NAME}
-          DARWIN_ARM64_SHA=$(grep "darwin-arm64" dist/checksums.txt | awk '{print $1}')
-          DARWIN_AMD64_SHA=$(grep "darwin-amd64" dist/checksums.txt | awk '{print $1}')
-          LINUX_ARM64_SHA=$(grep "linux-arm64" dist/checksums.txt | awk '{print $1}')
-          LINUX_AMD64_SHA=$(grep "linux-amd64" dist/checksums.txt | awk '{print $1}')
+          set -euo pipefail
+          cd dist
+          for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            archive="spark-tools-${VERSION}-${platform}.tar.gz"
+            if [ ! -s "${archive}" ]; then
+              echo "::error::missing archive ${archive}"
+              exit 1
+            fi
+          done
+          sha256sum -- *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Create or reuse release
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; keeping its notes."
+          else
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+      - name: Upload assets
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh release upload "${TAG}" dist/*.tar.gz dist/checksums.txt --clobber; then
+              gh release view "${TAG}" --json assets --jq '.assets[].name'
+              exit 0
+            fi
+            echo "::warning::asset upload failed (attempt ${attempt}/3)"
+            sleep $((attempt * 10))
+          done
+          echo "::error::asset upload failed after 3 attempts"
+          exit 1
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: [resolve, publish]
+    if: needs.resolve.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish formula
+        env:
+          VERSION: ${{ needs.resolve.outputs.tag }}
+          BREW_TAP_TOKEN: ${{ secrets.BREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::BREW_TAP_TOKEN is not set; skipping tap update for ${VERSION}"
+            exit 0
+          fi
+
+          cd dist
+          sha256sum -- *.tar.gz > checksums.txt
+          cd ..
+
+          sha_for() {
+            local sum
+            sum=$(awk -v pat="-$1.tar.gz" 'index($2, pat) { print $1 }' dist/checksums.txt)
+            if [ -z "${sum}" ]; then
+              echo "::error::no checksum for $1" >&2
+              exit 1
+            fi
+            printf '%s' "${sum}"
+          }
+
+          DARWIN_ARM64_SHA=$(sha_for darwin-arm64)
+          DARWIN_AMD64_SHA=$(sha_for darwin-amd64)
+          LINUX_ARM64_SHA=$(sha_for linux-arm64)
+          LINUX_AMD64_SHA=$(sha_for linux-amd64)
           BASE_URL="https://github.com/lazypower/spark-tools/releases/download/${VERSION}"
 
-          cat > formula.rb <<FORMULA
+          git clone --depth 1 "https://x-access-token:${BREW_TAP_TOKEN}@github.com/lazypower/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cat > tap/Formula/spark-tools.rb <<FORMULA
           class SparkTools < Formula
             desc "Pure Go toolchain for local LLM workflows on DGX Spark hardware"
             homepage "https://github.com/lazypower/spark-tools"
@@ -121,15 +269,20 @@ jobs:
           end
           FORMULA
 
-          # Push formula to homebrew tap repo
-          git clone "https://x-access-token:${BREW_TAP_TOKEN}@github.com/lazypower/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp formula.rb tap/Formula/spark-tools.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/spark-tools.rb
+          if git diff --cached --quiet; then
+            echo "Formula already at ${VERSION}; nothing to push."
+            exit 0
+          fi
           git commit -m "spark-tools ${VERSION}"
-          git push
-        env:
-          BREW_TAP_TOKEN: ${{ secrets.BREW_TAP_TOKEN }}
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "::warning::tap push failed (attempt ${attempt}/3); rebasing"
+            git pull --rebase --autostash origin HEAD || true
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push formula for ${VERSION}"
+          exit 1
