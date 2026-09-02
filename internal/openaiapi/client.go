@@ -27,16 +27,38 @@ func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
 }
 
+// normalizeBaseURL trims trailing slashes and a trailing "/v1" so the client
+// can append its own "/v1/..." paths exactly once.
+//
+// Every request path here is versioned ("/v1/models", "/v1/chat/completions"),
+// so a caller who passes the conventional OpenAI base URL -- which ends in /v1,
+// is what vLLM prints on startup, and is what every OpenAI client documents --
+// used to produce "/v1/v1/chat/completions" and a bare "HTTP 404: 404 page not
+// found" with nothing pointing at the cause. The most natural input produced
+// the most confusing failure.
+//
+// Trimming only the final segment keeps a path-mounted endpoint correct:
+// "https://host/openai/v1" becomes "https://host/openai", and the client then
+// requests "https://host/openai/v1/chat/completions".
+func normalizeBaseURL(raw string) string {
+	u := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if strings.HasSuffix(u, "/v1") {
+		u = strings.TrimSuffix(u, "/v1")
+	}
+	return strings.TrimRight(u, "/")
+}
+
 // WithAPIKey sets the API key for authenticated requests.
 func WithAPIKey(key string) Option {
 	return func(c *Client) { c.apiKey = key }
 }
 
-// NewClient creates a new llama-server API client.
+// NewClient creates a new OpenAI-compatible API client. baseURL may be given
+// with or without the "/v1" suffix; see normalizeBaseURL.
 func NewClient(baseURL string, opts ...Option) *Client {
 	c := &Client{
 		httpClient: &http.Client{Timeout: 5 * time.Minute},
-		baseURL:    strings.TrimRight(baseURL, "/"),
+		baseURL:    normalizeBaseURL(baseURL),
 	}
 	for _, o := range opts {
 		o(c)
