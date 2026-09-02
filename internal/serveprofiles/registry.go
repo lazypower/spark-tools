@@ -35,6 +35,27 @@ const qwen35VisionProvenance = "artifact metadata: Qwen3.6 config.json vision_co
 // entry's run.sh provenance.
 const qwen35DenseProvenance = "family inference from Qwen3_5MoeForConditionalGeneration (same Qwen3.5/3.6 chat template + qwen3/qwen3_coder parser contract); dense arch not yet served on-box"
 
+// qwen3CausalProvenance marks the Qwen3ForCausalLM (plain dense text) entry.
+// Distinct from qwen35DenseProvenance above, which backs the Qwen3.5/3.6 dense
+// ForConditionalGeneration line, whose claims are derived
+// from the ARTIFACT ITSELF -- the chat template shipped in tokenizer_config.json
+// -- rather than from run.sh or an on-box acceptance. That is weaker evidence
+// than serving the model, and deliberately recorded as such: the template proves
+// what the model is built to do, not that this engine build realizes it.
+const qwen3CausalProvenance = "Qwen3 dense chat template (tokenizer_config.json): enable_thinking + <think>, Hermes-format <tool_call> tags, no vision config; static artifact analysis on gfx1151, not exercised on-box (2026-09-02)"
+
+// qwen3CausalFingerprint is the environment the Qwen3ForCausalLM entry was authored
+// on. It is NOT the repo-wide seed, because these claims were not authored
+// against a GB10 running v0.23.0 and stamping them that way would assert a
+// provenance they do not have -- the same false-stamp problem the accelerator
+// fingerprint had. The consequence is honest and intentional: a GB10 emit for
+// this arch carries a re-verify warning until someone validates it there and
+// re-stamps this entry.
+var qwen3CausalFingerprint = fingerprint.Fingerprint{
+	Engine:      "kyuz0/vllm-therock-gfx1151@0.28.0+strix",
+	Accelerator: "amd:strix-halo:gfx1151",
+}
+
 // seededFingerprint is the GB10 Spark environment the v1 profiles were authored
 // against (AGENTS.md: image v0.23.0, GB10 / SM 12.1). The staleness check warns
 // when an operator emits for anything that diverges from this.
@@ -185,6 +206,37 @@ var builtins = []ArchProfile{
 			{Capability: serving.Vision, Supported: true, Status: StatusAsserted, Provenance: vlAcceptanceProvenance},
 		},
 	},
+	// Qwen3 DENSE text (Qwen3-0.6B … Qwen3-32B, model_type qwen3). Its own
+	// profile rather than an alt of Qwen3MoeForCausalLM for the same reason
+	// Qwen3_5Moe stands alone: the capability claims differ (no vision), and so
+	// does the tool-call FORMAT.
+	//
+	// The tool parser is "hermes", NOT the qwen3_coder used by the MoE entries.
+	// This arch's template instructs the model to emit
+	//   <tool_call>{"name": ..., "arguments": ...}</tool_call>
+	// which is the Hermes shape. qwen3_coder parses Qwen3-Coder's
+	// <function=name><parameter=...> XML instead, so inheriting the MoE profile
+	// here would hand vLLM a parser that cannot read this model's output.
+	//
+	// Evidence is the artifact's own chat template, not a serving run: thinking
+	// and tool-calling are asserted because the template implements them, and
+	// vision is false because the config carries no vision or image keys at all.
+	// Per §8.0 that makes them hypotheses (`asserted`), which is exactly what the
+	// status means -- but they have NOT been exercised against a live engine, so
+	// the first operator to serve tools on this arch should confirm before
+	// trusting the parser choice.
+	{
+		Arch:            "Qwen3ForCausalLM",
+		AuthoredAgainst: qwen3CausalFingerprint,
+		ReasoningParser: "qwen3",
+		ToolCallParser:  "hermes",
+		Claims: []Claim{
+			{Capability: serving.GuidedDecoding, Supported: true, Status: StatusAsserted, Provenance: qwen3CausalProvenance},
+			{Capability: serving.Thinking, Supported: true, Status: StatusAsserted, Provenance: qwen3CausalProvenance},
+			{Capability: serving.ToolCalling, Supported: true, Status: StatusAsserted, Provenance: qwen3CausalProvenance},
+			{Capability: serving.Vision, Supported: false, Status: StatusAsserted, Provenance: qwen3CausalProvenance},
+		},
+	},
 }
 
 // init stamps every built-in with the environment it was authored against, so
@@ -192,7 +244,11 @@ var builtins = []ArchProfile{
 // each literal.
 func init() {
 	for i := range builtins {
-		builtins[i].AuthoredAgainst = seededFingerprint
+		// An entry authored somewhere else carries its own anchor; only the
+		// unstamped ones inherit the repo-wide seed.
+		if builtins[i].AuthoredAgainst.Zero() {
+			builtins[i].AuthoredAgainst = seededFingerprint
+		}
 	}
 }
 
