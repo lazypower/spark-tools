@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 )
 
 // SystemSampler periodically samples CPU/memory/GPU metrics during
@@ -154,8 +156,8 @@ func (s *SystemSampler) takeSample() (sample systemSample, cpuOK, memOK bool) {
 	// Memory actually in use (not total RAM).
 	sample.memoryMB, memOK = sampleUsedMemoryMB()
 
-	// GPU metrics from nvidia-smi - best effort, not gated on availability.
-	gpu, gpuMem, gpuTemp := sampleNvidiaSMI()
+	// GPU metrics - best effort, not gated on availability.
+	gpu, gpuMem, gpuTemp := sampleGPUMetrics()
 	sample.gpuPercent = gpu
 	sample.gpuMemoryMB = gpuMem
 	sample.gpuTemp = gpuTemp
@@ -255,17 +257,35 @@ func sampleUsedMemoryMB() (int64, bool) {
 	return usedKB / 1024, true // KB to MB
 }
 
-func sampleNvidiaSMI() (gpuPct float64, gpuMemMB int64, gpuTemp float64) {
+// sampleGPUMetrics collects per-tick GPU telemetry, trying NVIDIA first and
+// falling back to amdgpu sysfs.
+//
+// The AMD path returns no memory figure on purpose: on a UMA APU neither sysfs
+// counter means what NVIDIA's memory.used means, and a benchmark result is the
+// last place to put a confidently wrong number. Callers already treat 0 as "no
+// data" because that is what the NVIDIA path returns on failure.
+func sampleGPUMetrics() (gpuPct float64, gpuMemMB int64, gpuTemp float64) {
+	pct, mem, temp, ok := sampleNvidiaSMI()
+	if ok {
+		return pct, mem, temp
+	}
+	if s, ok := hardware.AMDGPUStats(); ok {
+		return s.UtilizationPct, 0, s.TemperatureC
+	}
+	return 0, 0, 0
+}
+
+func sampleNvidiaSMI() (gpuPct float64, gpuMemMB int64, gpuTemp float64, ok bool) {
 	cmd := exec.Command("nvidia-smi",
 		"--query-gpu=utilization.gpu,memory.used,temperature.gpu",
 		"--format=csv,noheader,nounits")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, false
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) == 0 {
-		return 0, 0, 0
+		return 0, 0, 0, false
 	}
 	fields := strings.Split(lines[0], ", ")
 	if len(fields) >= 3 {
@@ -274,5 +294,5 @@ func sampleNvidiaSMI() (gpuPct float64, gpuMemMB int64, gpuTemp float64) {
 		gpuMemMB = mem
 		gpuTemp, _ = strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
 	}
-	return
+	return gpuPct, gpuMemMB, gpuTemp, true
 }

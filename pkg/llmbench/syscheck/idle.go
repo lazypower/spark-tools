@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lazypower/spark-tools/pkg/llmrun/hardware"
 )
 
 // IdleCheck verifies the system is reasonably idle for benchmarking.
@@ -172,12 +174,17 @@ func sampleCPULinux(ctx context.Context, duration time.Duration) (float64, error
 	return (1.0 - dIdle/dTotal) * 100.0, nil
 }
 
-// sampleGPU queries nvidia-smi for current GPU utilization.
+// sampleGPU reads current GPU utilization, trying NVIDIA first and falling back
+// to the amdgpu driver's busy counter, so the idle gate is enforced on AMD
+// rather than skipped.
 func sampleGPU() (float64, error) {
 	cmd := exec.Command("nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("nvidia-smi not available: %w", err)
+		if s, ok := hardware.AMDGPUStats(); ok {
+			return s.UtilizationPct, nil
+		}
+		return 0, fmt.Errorf("no GPU utilization source available: %w", err)
 	}
 	s := strings.TrimSpace(string(out))
 	// Take first GPU if multiple lines
