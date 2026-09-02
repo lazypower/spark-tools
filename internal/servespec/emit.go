@@ -52,8 +52,15 @@ type Host struct {
 	Image string
 	// Port is the host port mapped to the container's 8000. Defaults to 8000.
 	Port int
-	// Runtime is the container runtime label (e.g. "nvidia"). Defaults to "nvidia".
+	// Runtime is the container runtime label (e.g. "nvidia"). Defaults to
+	// "nvidia". It is only meaningful for vendors that use a runtime shim; ROCm
+	// exposes the GPU by device passthrough and has no runtime to name.
 	Runtime string
+	// Accelerator is the target accelerator fingerprint ("vendor:arch:compute",
+	// e.g. "amd:strix-halo:gfx1151"). Only its vendor dimension is used here, to
+	// decide how the container is given the GPU. Empty means NVIDIA, preserving
+	// the behavior from before any other vendor was renderable.
+	Accelerator string
 	// Volumes maps host paths to container paths (read-only model mounts).
 	Volumes []Mount
 	// ServiceName is the compose/quadlet service name. Defaults to "vllm".
@@ -104,6 +111,21 @@ func (h Host) runtime() string {
 	}
 	return h.Runtime
 }
+
+// gpuVendor returns the vendor dimension of the accelerator fingerprint. An
+// unset accelerator answers "nvidia" so existing specs render byte-identically
+// to what they did before GPU access was vendor-aware.
+func (h Host) gpuVendor() string {
+	if i := strings.IndexByte(h.Accelerator, ':'); i > 0 {
+		return h.Accelerator[:i]
+	}
+	return vendorNVIDIA
+}
+
+const (
+	vendorNVIDIA = "nvidia"
+	vendorAMD    = "amd"
+)
 
 func (h Host) service() string {
 	if h.ServiceName == "" {
@@ -206,7 +228,16 @@ func DockerRun(r *servecontract.Resolved, h Host) string {
 	var b strings.Builder
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("docker run -d \\\n")
-	fmt.Fprintf(&b, "  --runtime %s --gpus all \\\n", h.runtime())
+	// How the container is handed the GPU is vendor-specific. NVIDIA injects a
+	// runtime shim; ROCm has no shim and instead needs the KFD compute node and
+	// the DRM render nodes passed through, with the caller in the groups that
+	// own them.
+	if h.gpuVendor() == vendorAMD {
+		b.WriteString("  --device /dev/kfd --device /dev/dri \\\n")
+		b.WriteString("  --group-add video --group-add render \\\n")
+	} else {
+		fmt.Fprintf(&b, "  --runtime %s --gpus all \\\n", h.runtime())
+	}
 	b.WriteString("  --ipc host \\\n")
 	fmt.Fprintf(&b, "  -p %d:8000 \\\n", h.port())
 	for _, m := range h.Volumes {
@@ -237,10 +268,19 @@ func Compose(r *servecontract.Resolved, h Host) string {
 	b.WriteString("services:\n")
 	fmt.Fprintf(&b, "  %s:\n", h.service())
 	fmt.Fprintf(&b, "    image: %s\n", h.Image)
-	fmt.Fprintf(&b, "    runtime: %s\n", h.runtime())
+	if h.gpuVendor() != vendorAMD {
+		fmt.Fprintf(&b, "    runtime: %s\n", h.runtime())
+	}
 	b.WriteString("    restart: unless-stopped\n")
-	b.WriteString("    deploy:\n      resources:\n        reservations:\n          devices:\n")
-	b.WriteString("            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n")
+	if h.gpuVendor() == vendorAMD {
+		// ROCm has no device driver to reserve through compose's deploy block;
+		// the GPU arrives as passed-through device nodes.
+		b.WriteString("    devices:\n      - /dev/kfd\n      - /dev/dri\n")
+		b.WriteString("    group_add:\n      - video\n      - render\n")
+	} else {
+		b.WriteString("    deploy:\n      resources:\n        reservations:\n          devices:\n")
+		b.WriteString("            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n")
+	}
 	b.WriteString("    ipc: host\n")
 	b.WriteString("    ports:\n")
 	fmt.Fprintf(&b, "      - \"%d:8000\"\n", h.port())
@@ -308,7 +348,17 @@ func Quadlet(r *servecontract.Resolved, h Host) string {
 	b.WriteString("[Container]\n")
 	fmt.Fprintf(&b, "Image=%s\n", h.Image)
 	fmt.Fprintf(&b, "PublishPort=%d:8000\n", h.port())
-	b.WriteString("PodmanArgs=--ipc host --gpus all\n")
+	if h.gpuVendor() == vendorAMD {
+		// Quadlet expresses passthrough as AddDevice. keep-groups is the
+		// rootless-podman way to carry the caller's video/render membership
+		// into the container: podman cannot map host GIDs into the user
+		// namespace, so the credentials are handed through directly.
+		b.WriteString("AddDevice=/dev/kfd\n")
+		b.WriteString("AddDevice=/dev/dri\n")
+		b.WriteString("PodmanArgs=--ipc host --group-add keep-groups\n")
+	} else {
+		b.WriteString("PodmanArgs=--ipc host --gpus all\n")
+	}
 	for _, m := range h.Volumes {
 		fmt.Fprintf(&b, "Volume=%s:%s:ro\n", m.Host, m.Container)
 	}
@@ -350,6 +400,14 @@ func SpecHash(r *servecontract.Resolved, h Host) string {
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "image=%s\nport=%d\n", h.Image, h.port())
+	// GPU access is part of what makes a spec what it is, but adding it
+	// unconditionally would change every existing hash and orphan running
+	// NVIDIA instances from their identity labels. Emitting the line only for
+	// other vendors distinguishes an AMD spec while leaving the historical
+	// hashes byte-identical.
+	if v := h.gpuVendor(); v != vendorNVIDIA {
+		fmt.Fprintf(&b, "gpu=%s\n", v)
+	}
 	mounts := make([]string, 0, len(h.Volumes))
 	for _, m := range h.Volumes {
 		mounts = append(mounts, m.Host+":"+m.Container)

@@ -25,8 +25,8 @@ type PlanRequest struct {
 	GPUMemUtil   float64 // vLLM --gpu-memory-utilization fraction (0,1]; 0 = unset (hardware default, then vLLM's own)
 	MaxNumSeqs   int     // vLLM --max-num-seqs (max concurrent sequences); 0 = unset (hardware default, then vLLM's own)
 	Image        string  // engine image digest/tag (also the target engine fingerprint)
-	Accelerator  string // target accelerator fingerprint
-	Port         int    // host port (default 8000)
+	Accelerator  string  // target accelerator fingerprint
+	Port         int     // host port (default 8000)
 	Mounts       []servespec.Mount
 	WatchdogDir  string // host dir holding watchdog.sh (required for a serving instance)
 }
@@ -102,9 +102,10 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error)
 	// Host without labels first, so the spec hash (a label) is computed over the
 	// command/image/mounts, not over itself.
 	host := servespec.Host{
-		Image:   imageRef(req.Image),
-		Port:    port,
-		Volumes: mounts,
+		Image:       imageRef(req.Image),
+		Port:        port,
+		Volumes:     mounts,
+		Accelerator: req.Accelerator,
 	}
 	if watchdogDir != "" {
 		host.Watchdog = &servespec.Watchdog{ScriptHostDir: watchdogDir, Project: project}

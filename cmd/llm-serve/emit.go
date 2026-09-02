@@ -74,7 +74,7 @@ func emitCmd() *cobra.Command {
 				Dtype:        dtype,
 				Target:       llmserve.Fingerprint{Engine: image, Accelerator: accelerator},
 			}
-			host := servespec.Host{Image: imageRef(image), Port: port, Volumes: mountList}
+			host := servespec.Host{Image: imageRef(image), Port: port, Volumes: mountList, Accelerator: accelerator}
 
 			res, err := llmserve.Emit(req, facts, tgt, host)
 			if err != nil {
