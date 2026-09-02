@@ -54,12 +54,12 @@ func TestBuildCommand_ServerMode(t *testing.T) {
 	caps := fullCaps(binDir)
 
 	cfg := RunConfig{
-		ServerMode: true,
-		ModelPath:  "/models/test.gguf",
-		Host:       "0.0.0.0",
-		Port:       9090,
-		Threads:    8,
-		GPULayers:  -1,
+		ServerMode:  true,
+		ModelPath:   "/models/test.gguf",
+		Host:        "0.0.0.0",
+		Port:        9090,
+		Threads:     8,
+		GPULayers:   -1,
 		ContextSize: 4096,
 	}
 

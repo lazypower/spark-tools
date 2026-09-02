@@ -122,3 +122,61 @@ func TestBuildCommand_CPUOnlyStillRefusesOffload(t *testing.T) {
 		t.Errorf("error should offer ROCm as a remedy, got %q", got)
 	}
 }
+
+// Real `llama-server --list-devices` output from a ROCm build on gfx1151.
+const rocmDeviceList = `Available devices:
+  ROCm0: Radeon 8060S Graphics (64038 MiB, 64034 MiB free)
+`
+
+// Same build with no GPU visible: it answers, and the answer is "none".
+const emptyDeviceList = `0.00.032.132 E ggml_cuda_init: failed to initialize ROCm: no ROCm-capable device is detected
+Available devices:
+  (none)
+`
+
+func TestDetectBackendFromDevices(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"rocm build with a device", rocmDeviceList, "rocm"},
+		{"cuda build", "Available devices:\n  CUDA0: NVIDIA GB10 (131072 MiB, 130000 MiB free)\n", "cuda"},
+		{"vulkan build", "Available devices:\n  Vulkan0: AMD Radeon (8192 MiB)\n", "vulkan"},
+		{"no usable device", emptyDeviceList, ""},
+		// A build too old for --list-devices prints usage or an error; that is
+		// not a device listing and must not be read as one.
+		{"unsupported flag", "error: unknown argument: --list-devices", ""},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := DetectBackendFromDevices(c.in); got != c.want {
+				t.Errorf("DetectBackendFromDevices() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// An empty listing is a real CPU-only answer; an unparseable one is a failed
+// probe. Conflating them would either refuse offload on a GPU box or claim a
+// GPU on a CPU box.
+func TestDevicesListed(t *testing.T) {
+	if !devicesListed(rocmDeviceList) || !devicesListed(emptyDeviceList) {
+		t.Error("real listings must be recognized as listings")
+	}
+	if devicesListed("error: unknown argument: --list-devices") {
+		t.Error("an unsupported-flag error must not count as a listing")
+	}
+}
+
+// The regression that motivated all of this: a current llama-server --help is
+// pure flag reference with no backend marker, and a successful GPU init prints
+// nothing either. Text sniffing therefore reports cpu for a real GPU build,
+// which then refuses GPU offload.
+func TestDetectBackend_SilentGPUBuildLooksLikeCPU(t *testing.T) {
+	quietVersion := "version: 0.3.0-dev (build 10752, commit b96806d96)\nbuilt with GNU 13.3.0 for Linux x86_64\n"
+	if got := DetectBackend(quietVersion); got != "cpu" {
+		t.Fatalf("precondition: quiet output should sniff as cpu, got %q", got)
+	}
+	// The device probe is what rescues it.
+	if got := DetectBackendFromDevices(rocmDeviceList); got != "rocm" {
+		t.Errorf("device listing must identify the backend the prose omits, got %q", got)
+	}
+}
