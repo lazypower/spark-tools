@@ -1,8 +1,11 @@
 package serveprofiles
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/lazypower/spark-tools/internal/fingerprint"
 	"github.com/lazypower/spark-tools/internal/serving"
 )
 
@@ -13,10 +16,30 @@ type CompatRequest struct {
 	Capabilities []serving.Capability
 	Facts        serving.ArtifactFacts
 	Profile      ArchProfile
+	// Target is the environment the launch is emitted for. Some footguns are a
+	// property of the SILICON rather than the model: a quantization format ships
+	// vendor-specific kernels, so whether an artifact can load at all depends on
+	// the accelerator it is pointed at. Without this dimension the rule set is
+	// accelerator-blind and cannot express that class of rejection.
+	Target fingerprint.Fingerprint
 }
 
 func (r CompatRequest) wants(c serving.Capability) bool {
 	return slices.Contains(r.Capabilities, c)
+}
+
+// acceleratorVendor returns the vendor dimension of the target accelerator
+// fingerprint, or "" when the target does not carry one in vendor:arch:compute
+// form.
+//
+// Rules must treat "" as "unknown, do not fire". An accelerator we cannot parse
+// is not evidence of incompatibility, and rejecting on ignorance would break
+// every caller using a free-form target string.
+func (r CompatRequest) acceleratorVendor() string {
+	if i := strings.IndexByte(r.Target.Accelerator, ':'); i > 0 {
+		return r.Target.Accelerator[:i]
+	}
+	return ""
 }
 
 // CompatRule is a declarative negative-compatibility rule (§3, codex #4):
@@ -41,6 +64,31 @@ type CompatRule struct {
 // artifact can't actually serve must reject, not silently emit a server that
 // lacks it.
 var CompatRules = []CompatRule{
+	// NVFP4 is NVIDIA's FP4 format and its vLLM kernels are CUDA-only (Blackwell
+	// native FP4). Pointing an NVFP4 artifact at a non-NVIDIA accelerator emits a
+	// launch that cannot load the weights at all — the vendor is in the name of
+	// the format. Reject rather than hand the operator a spec that dies at load.
+	//
+	// Deliberately scoped to NVFP4 and nothing else. FP8 is NOT gated here even
+	// though gfx1151 has no native FP8: "unverified on this accelerator" is not
+	// the same claim as "cannot work", vLLM has non-native FP8 paths, and
+	// blocking on an untested hypothesis would be the same error as encoding a
+	// guessed memory ceiling. If someone measures FP8 failing on a given
+	// accelerator, that measurement is what earns a rule here.
+	{
+		Name: "nvfp4-requires-nvidia",
+		Violated: func(r CompatRequest) (bool, string) {
+			if r.Facts.Quant != serving.QuantNVFP4 {
+				return false, ""
+			}
+			v := r.acceleratorVendor()
+			if v == "" || v == "nvidia" {
+				return false, ""
+			}
+			return true, fmt.Sprintf("artifact is NVFP4 (NVIDIA-native FP4, CUDA-only kernels) but the target accelerator %q is %s", r.Target.Accelerator, v)
+		},
+		Remedy: "serve a bf16/fp16 or vendor-neutral quantization on this accelerator, or emit for an NVIDIA target",
+	},
 	// Vision requires a multimodal processor in the artifact. The arch profile may
 	// claim vision (the arch supports it), but a text-only build of that arch ships
 	// no processor — vLLM would then serve text while the caller believes it

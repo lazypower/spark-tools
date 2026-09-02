@@ -155,7 +155,7 @@ func Resolve(req Request, facts serving.ArtifactFacts) (*Resolved, error) {
 	}
 
 	// 4. Negative-compat rules — reject footgun combinations.
-	creq := serveprofiles.CompatRequest{Capabilities: req.Capabilities, Facts: facts, Profile: profile}
+	creq := serveprofiles.CompatRequest{Capabilities: req.Capabilities, Facts: facts, Profile: profile, Target: req.Target}
 	for _, rule := range serveprofiles.CompatRules {
 		if bad, reason := rule.Violated(creq); bad {
 			return nil, &RejectionError{Rule: rule.Name, Reason: reason, Remedy: rule.Remedy}
