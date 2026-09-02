@@ -101,6 +101,7 @@ func detectGPUsAMDFrom(root string) []GPUInfo {
 		gpu := GPUInfo{
 			Index:    len(gpus),
 			Vendor:   VendorAMD,
+			DeviceID: props["device_id"],
 			Name:     amdGPUName(props["device_id"], gfx),
 			MemoryGB: float64(sumFramebufferBytes(dir)) / (1024 * 1024 * 1024),
 			Compute:  gfx,

@@ -46,6 +46,7 @@ func emitCmd() *cobra.Command {
 			if err := validateBudgetFlags(cmd); err != nil {
 				return err
 			}
+			accelerator = resolveAccelerator(accelerator, cmd.ErrOrStderr())
 			capList, err := parseCaps(caps)
 			if err != nil {
 				return err
@@ -98,7 +99,7 @@ func emitCmd() *cobra.Command {
 	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to the hardware default, then vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&dtype, "dtype", "", "vLLM --dtype (default auto)")
 	f.StringVar(&image, "image", "", "engine image digest/tag, e.g. vllm/vllm-openai@v0.23.0 (required) — also the fingerprint engine")
-	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint (vendor:arch)")
+	f.StringVar(&accelerator, "accelerator", "", acceleratorFlagUsage)
 	f.StringVar(&target, "target", "compose", "render target: compose, docker-run, quadlet")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")

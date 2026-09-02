@@ -35,7 +35,8 @@ const (
 // GPUInfo describes a detected GPU.
 type GPUInfo struct {
 	Index    int     `json:"index"`
-	Vendor   string  `json:"vendor,omitempty"` // "nvidia" or "amd"
+	Vendor   string  `json:"vendor,omitempty"`   // "nvidia" or "amd"
+	DeviceID int64   `json:"deviceId,omitempty"` // PCI device ID, when known
 	Name     string  `json:"name"`
 	MemoryGB float64 `json:"memoryGB"`
 	Compute  string  `json:"compute,omitempty"` // e.g. "sm_100" for GB10, "gfx1151" for Strix Halo
