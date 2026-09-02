@@ -220,11 +220,42 @@ func warningComment(warnings []string, prefix string) string {
 	return b.String()
 }
 
+// amdGroupWarning flags a GPU-access form that is correct for Docker and
+// silently wrong for rootless podman.
+//
+// Naming groups (--group-add video/render, or compose group_add) is the Docker
+// way to hand a container the KFD and DRM device groups. Rootless podman cannot
+// map host GIDs into the user namespace, so naming a group there does nothing:
+// the container starts, the device nodes are present, and rocminfo finds no
+// agent. Nothing errors -- the launch just has no GPU, which is the worst shape
+// a failure can take.
+//
+// Measured on gfx1151 (rootless podman): group names fail with or without fresh
+// credentials; --group-add keep-groups works; --security-opt seccomp=unconfined
+// is NOT required for device access. The quadlet target, being podman-native,
+// already emits keep-groups.
+//
+// This warns rather than switching form because the correct answer depends on
+// the runtime actually used, which the spec cannot know: keep-groups is
+// podman-only and Docker rejects it, so silently emitting it would break the
+// Docker case to fix the podman one.
+func (h Host) amdGroupWarning(form string) []string {
+	if h.gpuVendor() != vendorAMD {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"AMD GPU access is rendered as %s, which is the Docker form. Under ROOTLESS PODMAN it silently yields a container with NO GPU "+
+			"(podman cannot map host GIDs into the user namespace, so naming groups does nothing and rocminfo finds no agent) — "+
+			"replace it with --group-add keep-groups there. Measured on gfx1151: keep-groups works, group names do not, seccomp=unconfined is not needed.",
+		form)}
+}
+
 // DockerRun renders a `docker run` invocation. Flags from the contract are
 // emitted verbatim after the image; host facts (runtime, port, mounts) precede
 // it. Long lines are continued for readability.
 func DockerRun(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
+	warnings = append(warnings, h.amdGroupWarning("--group-add video --group-add render")...)
 	var b strings.Builder
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("docker run -d \\\n")
@@ -263,6 +294,7 @@ func DockerRun(r *servecontract.Resolved, h Host) string {
 // emitted — that is runtime supervision (v2 B); v1 emits only the engine service.
 func Compose(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
+	warnings = append(warnings, h.amdGroupWarning("group_add: [video, render]")...)
 	var b strings.Builder
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("services:\n")

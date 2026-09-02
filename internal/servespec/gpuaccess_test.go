@@ -141,3 +141,43 @@ func TestGPUVendor(t *testing.T) {
 		}
 	}
 }
+
+// The Docker group form silently yields a GPU-less container under rootless
+// podman, so an AMD spec that renders it must say so where the operator will
+// see it: in the spec itself.
+func TestDockerRun_AMDWarnsAboutRootlessPodmanGroups(t *testing.T) {
+	out := DockerRun(resolvedFixture(), amdHost())
+	if !strings.Contains(out, "keep-groups") {
+		t.Errorf("AMD docker run must warn that rootless podman needs keep-groups\n%s", out)
+	}
+	if !strings.Contains(out, "WARNING") {
+		t.Errorf("the note must render as a warning comment\n%s", out)
+	}
+}
+
+func TestCompose_AMDWarnsAboutRootlessPodmanGroups(t *testing.T) {
+	out := Compose(resolvedFixture(), amdHost())
+	if !strings.Contains(out, "keep-groups") {
+		t.Errorf("AMD compose must warn about the podman group form\n%s", out)
+	}
+}
+
+// Quadlet is podman-native and already emits keep-groups, so the group warning
+// would be noise about a problem it does not have. It may still carry OTHER
+// warnings (an uncovered mount, staleness), so this asserts only that the group
+// advice is absent -- not that the spec is warning-free.
+func TestQuadlet_AMDDoesNotCarryGroupWarning(t *testing.T) {
+	out := Quadlet(resolvedFixture(), amdHost())
+	if strings.Contains(out, "keep-groups there") {
+		t.Errorf("quadlet already emits keep-groups and must not be told to switch to it\n%s", out)
+	}
+}
+
+// NVIDIA uses a runtime shim and no group juggling; the warning must not leak.
+func TestRenderers_NVIDIANoGroupWarning(t *testing.T) {
+	for _, render := range []func(*servecontract.Resolved, Host) string{DockerRun, Compose, Quadlet} {
+		if out := render(resolvedFixture(), nvidiaHost()); strings.Contains(out, "keep-groups") {
+			t.Errorf("NVIDIA specs must not mention keep-groups\n%s", out)
+		}
+	}
+}
