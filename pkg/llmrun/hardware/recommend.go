@@ -57,6 +57,29 @@ func RecommendConfig(hw *HardwareInfo, meta *gguf.GGUFMetadata) engine.RunConfig
 	return cfg
 }
 
+// memoryBudgetGB returns the pool a model's weights and KV cache actually have
+// to fit in.
+//
+// When layers are offloaded to a GPU that pool is the accelerator's memory, not
+// system RAM. On a UMA APU the two are not merely different, they overlap: the
+// GPU pool is carved FROM system RAM (62.5 GiB of 125 GiB on Strix Halo), so
+// budgeting against total system memory counts the same bytes twice and
+// recommends a context that cannot fit. On a discrete GPU the error is larger
+// still -- a 24 GB card in a 128 GB host would be budgeted five times its real
+// capacity.
+//
+// With no GPU detected the model runs on the CPU and system RAM is exactly the
+// right budget, which is what this returns.
+func memoryBudgetGB(hw *HardwareInfo) float64 {
+	if hw == nil {
+		return 0
+	}
+	if len(hw.GPUs) > 0 && hw.GPUs[0].MemoryGB > 0 {
+		return hw.GPUs[0].MemoryGB
+	}
+	return hw.TotalMemoryGB
+}
+
 // estimateMaxContext calculates the maximum context length the hardware
 // can support for a given model, based on available memory after the model
 // weights are loaded.
@@ -79,7 +102,7 @@ func estimateMaxContext(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 	if meta == nil || meta.LayerCount == 0 || meta.EmbeddingSize == 0 {
 		// Without model metadata, fall back to a heuristic based on
 		// available memory: ~4K context per 8 GB, capped at 32K.
-		ctx := int(hw.TotalMemoryGB/8) * 4096
+		ctx := int(memoryBudgetGB(hw)/8) * 4096
 		if ctx < defaultContext {
 			ctx = defaultContext
 		}
@@ -93,7 +116,7 @@ func estimateMaxContext(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 	modelSizeGB := estimateModelSizeGB(meta)
 
 	// Available memory after model load (90% of remaining).
-	availableGB := (hw.TotalMemoryGB - modelSizeGB) * 0.9
+	availableGB := (memoryBudgetGB(hw) - modelSizeGB) * 0.9
 	if availableGB < 0 {
 		availableGB = 0
 	}
@@ -177,6 +200,13 @@ func recommendBatchSize(hw *HardwareInfo, meta *gguf.GGUFMetadata) int {
 		return defaultBatch
 	}
 
+	// Deliberately still keyed on SYSTEM memory, not the GPU budget. These
+	// thresholds were tuned against total RAM, and re-basing them on a smaller
+	// GPU pool would silently drop a 24 GB discrete card from 2048 to 512 --
+	// a throughput regression, not a correctness fix. Batch buffers are modest
+	// next to weights and KV cache, so the 2x error that matters for context
+	// does not matter here.
+	//
 	// Scale batch size with total memory:
 	//   < 16 GB  -> 256
 	//   16-64 GB -> 512
