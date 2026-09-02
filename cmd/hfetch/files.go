@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
@@ -17,12 +18,26 @@ func filesCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			quantFilter, _ := cmd.Flags().GetString("quant")
+			asJSON, _ := cmd.Flags().GetBool("json")
 
 			client := newAPIClient(cmd)
 
 			files, err := client.ListFiles(context.Background(), args[0])
 			if err != nil {
 				return err
+			}
+
+			// The JSON form is the repo tree llm-serve's completeness gate
+			// consumes (`llm-serve emit --repo-tree`), so it emits the WHOLE
+			// tree and applies none of the filters below. Those exist to make
+			// the human table readable -- the default one hides everything
+			// that is not GGUF -- and a gate fed a filtered tree would "verify"
+			// an artifact against a file list missing the safetensors, configs
+			// and tokenizer it is supposed to be checking.
+			if asJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(files)
 			}
 
 			headerStyle := lipgloss.NewStyle().Bold(true)
@@ -98,6 +113,7 @@ func filesCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("quant", "", "Filter by quantization type")
+	cmd.Flags().Bool("json", false, "emit the full repo tree as JSON, for `llm-serve emit --repo-tree` (unfiltered: the completeness gate needs every file)")
 	cmd.Flags().String("min-size", "", "Minimum file size")
 	cmd.Flags().String("max-size", "", "Maximum file size")
 	tokenFlag(cmd)
