@@ -244,9 +244,11 @@ func (h Host) amdGroupWarning(form string) []string {
 		return nil
 	}
 	return []string{fmt.Sprintf(
-		"AMD GPU access is rendered as %s, which is the Docker form. Under ROOTLESS PODMAN it silently yields a container with NO GPU "+
-			"(podman cannot map host GIDs into the user namespace, so naming groups does nothing and rocminfo finds no agent) — "+
-			"replace it with --group-add keep-groups there. Measured on gfx1151: keep-groups works, group names do not, seccomp=unconfined is not needed.",
+		"under ROOTLESS PODMAN this spec STARTS SUCCESSFULLY AND RUNS THE ENGINE WITH NO GPU. It does not error and nothing in the logs "+
+			"says the accelerator is missing, so the usual outcome is the launch being written off as slow hardware. "+
+			"AMD GPU access is rendered here as %s, which is the Docker form; podman cannot map host GIDs into the user namespace, so naming "+
+			"groups does nothing and rocminfo finds no agent inside the container. Replace it with --group-add keep-groups when running under podman. "+
+			"Measured on gfx1151: keep-groups works, group names do not (with or without fresh credentials), and --security-opt seccomp=unconfined is not required.",
 		form)}
 }
 

@@ -153,6 +153,12 @@ func TestDockerRun_AMDWarnsAboutRootlessPodmanGroups(t *testing.T) {
 	if !strings.Contains(out, "WARNING") {
 		t.Errorf("the note must render as a warning comment\n%s", out)
 	}
+	// The wording carries the load here. An operator who reads "may need
+	// adjustment" skips it; one who reads that the spec starts successfully
+	// with no GPU does not. The failure being SILENT is the whole point.
+	if !strings.Contains(out, "STARTS SUCCESSFULLY AND RUNS THE ENGINE WITH NO GPU") {
+		t.Errorf("the warning must state that the failure is silent, not merely that the form differs\n%s", out)
+	}
 }
 
 func TestCompose_AMDWarnsAboutRootlessPodmanGroups(t *testing.T) {
