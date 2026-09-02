@@ -198,19 +198,40 @@ func parseCapabilities(helpText string, caps *Capabilities) {
 	// Detect backend from help text or version string.
 	caps.Backend = DetectBackend(helpText)
 
-	// Try to detect CUDA compute capability.
-	if caps.Backend == "cuda" {
+	// Try to detect the accelerator architecture the build targets.
+	switch caps.Backend {
+	case "cuda":
 		if cc := detectCUDACompute(helpText); cc != "" {
 			caps.CUDACompute = cc
+		}
+	case "rocm":
+		if arch := detectROCmArch(helpText); arch != "" {
+			caps.ROCmArch = arch
 		}
 	}
 }
 
+// rocmMarker matches the fingerprints of a ROCm/HIP llama.cpp build: the ROCm
+// name itself, the HIP runtime, hipBLAS, or a gfx target string.
+//
+// The markers are word-bounded on purpose. A bare "HIP" substring match would
+// fire on ordinary words in help text -- "chipset" contains it -- and
+// misclassify a CPU build as a GPU one.
+var rocmMarker = regexp.MustCompile(`\bROCM\b|\bHIP\b|\bHIPBLAS\b|\bGFX[0-9A-F]{3,4}\b`)
+
 // DetectBackend determines the llama.cpp backend from version/help text.
 // Exported for testing.
+//
+// ROCm is tested BEFORE CUDA, and the order is load-bearing. llama.cpp compiles
+// its HIP backend from the same ggml-cuda sources, so a ROCm build's output
+// still carries "CUDA" strings; checking CUDA first would classify every AMD
+// build as CUDA. The converse never happens -- a genuine CUDA build does not
+// mention ROCm, HIP, or a gfx target -- so leading with ROCm is safe.
 func DetectBackend(text string) string {
 	upper := strings.ToUpper(text)
 	switch {
+	case rocmMarker.MatchString(upper):
+		return "rocm"
 	case strings.Contains(upper, "CUDA"):
 		return "cuda"
 	case strings.Contains(upper, "METAL"):
@@ -228,6 +249,16 @@ func detectCUDACompute(text string) string {
 	re := regexp.MustCompile(`sm_\d+`)
 	if m := re.FindString(text); m != "" {
 		return m
+	}
+	return ""
+}
+
+// detectROCmArch tries to find an AMD gfx target string (e.g., "gfx1151") in the
+// help/version text. It is the ROCm counterpart of detectCUDACompute.
+func detectROCmArch(text string) string {
+	re := regexp.MustCompile(`(?i)gfx[0-9a-f]{3,4}`)
+	if m := re.FindString(text); m != "" {
+		return strings.ToLower(m)
 	}
 	return ""
 }

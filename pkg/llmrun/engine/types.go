@@ -109,16 +109,17 @@ func ParseNumaStrategy(s string) (NumaStrategy, error) {
 // Capabilities represents what the detected llama.cpp build supports.
 type Capabilities struct {
 	Version        string `json:"version"`
-	Backend        string `json:"backend"` // "cuda", "metal", "vulkan", "cpu"
+	Backend        string `json:"backend"` // "cuda", "rocm", "metal", "vulkan", "cpu"
 	CUDACompute    string `json:"cudaCompute,omitempty"`
+	ROCmArch       string `json:"rocmArch,omitempty"` // e.g. "gfx1151" for Strix Halo
 	FlashAttention bool   `json:"flashAttention"`
 	NUMA           bool   `json:"numa"`
 	MMap           bool   `json:"mmap"`
 	MLock          bool   `json:"mlock"`
-	ServerMode     bool   `json:"serverMode"`  // llama-server binary present
-	BenchMode      bool   `json:"benchMode"`   // llama-bench binary present
-	BinaryPath     string `json:"binaryPath"`  // Path to the llama-server or llama-cli binary
-	BinaryDir      string `json:"binaryDir"`   // Directory containing binaries
+	ServerMode     bool   `json:"serverMode"` // llama-server binary present
+	BenchMode      bool   `json:"benchMode"`  // llama-bench binary present
+	BinaryPath     string `json:"binaryPath"` // Path to the llama-server or llama-cli binary
+	BinaryDir      string `json:"binaryDir"`  // Directory containing binaries
 }
 
 // Process represents a running llama.cpp instance.
