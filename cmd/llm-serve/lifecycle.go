@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ func dirs() (stateDir, specDir, watchdogDir string) {
 func upCmd() *cobra.Command {
 	var (
 		modelDir, name, served, image, accelerator, target, repoTree string
+		ctrEngine, engineCmd                                         string
 		caps, mounts                                                 []string
 		ctx, port, maxNumSeqs                                        int
 		gpuMemUtil                                                   float64
@@ -50,6 +52,7 @@ func upCmd() *cobra.Command {
 				return err
 			}
 			accelerator = resolveAccelerator(accelerator, cmd.ErrOrStderr())
+			ctrEngine = resolveContainerEngine(ctrEngine, cmd.ErrOrStderr())
 			capList, err := parseCaps(caps)
 			if err != nil {
 				return err
@@ -69,18 +72,20 @@ func upCmd() *cobra.Command {
 			}
 
 			plan, resolved, err := llmserve.BuildPlan(llmserve.PlanRequest{
-				Name:         name,
-				ServedName:   served,
-				Facts:        facts,
-				Capabilities: capList,
-				ContextLen:   ctx,
-				GPUMemUtil:   gpuMemUtil,
-				MaxNumSeqs:   maxNumSeqs,
-				Image:        image,
-				Accelerator:  accelerator,
-				Port:         port,
-				Mounts:       mountList,
-				WatchdogDir:  watchdogDir,
+				Name:            name,
+				ServedName:      served,
+				Facts:           facts,
+				Capabilities:    capList,
+				ContextLen:      ctx,
+				GPUMemUtil:      gpuMemUtil,
+				MaxNumSeqs:      maxNumSeqs,
+				Image:           image,
+				Accelerator:     accelerator,
+				ContainerEngine: ctrEngine,
+				Command:         strings.Fields(engineCmd),
+				Port:            port,
+				Mounts:          mountList,
+				WatchdogDir:     watchdogDir,
 			})
 			if err != nil {
 				return err
@@ -110,6 +115,8 @@ func upCmd() *cobra.Command {
 	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&image, "image", "", "engine image, e.g. vllm/vllm-openai@v0.23.0 (required)")
 	f.StringVar(&accelerator, "accelerator", "", acceleratorFlagUsage)
+	f.StringVar(&ctrEngine, "container-engine", "", containerEngineFlagUsage)
+	f.StringVar(&engineCmd, "engine-command", "", "argv prefix between the image and the flags, for images whose entrypoint does not start the server (e.g. \"vllm serve\")")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")
 	f.StringVar(&target, "target", "compose", "render target (B1: compose only)")

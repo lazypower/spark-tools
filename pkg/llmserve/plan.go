@@ -26,9 +26,15 @@ type PlanRequest struct {
 	MaxNumSeqs   int     // vLLM --max-num-seqs (max concurrent sequences); 0 = unset (hardware default, then vLLM's own)
 	Image        string  // engine image digest/tag (also the target engine fingerprint)
 	Accelerator  string  // target accelerator fingerprint
-	Port         int     // host port (default 8000)
-	Mounts       []servespec.Mount
-	WatchdogDir  string // host dir holding watchdog.sh (required for a serving instance)
+	// ContainerEngine and Command are the same host facts `emit` takes. Without
+	// them `up` renders the Docker GPU-access form and assumes the official
+	// vllm entrypoint, so the primary lifecycle command reproduced both of the
+	// failures the emit path already fixes.
+	ContainerEngine string
+	Command         []string
+	Port            int // host port (default 8000)
+	Mounts          []servespec.Mount
+	WatchdogDir     string // host dir holding watchdog.sh (required for a serving instance)
 }
 
 // BuildPlan resolves the request into a validated contract and renders the
@@ -102,10 +108,12 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error)
 	// Host without labels first, so the spec hash (a label) is computed over the
 	// command/image/mounts, not over itself.
 	host := servespec.Host{
-		Image:       imageRef(req.Image),
-		Port:        port,
-		Volumes:     mounts,
-		Accelerator: req.Accelerator,
+		Image:           imageRef(req.Image),
+		Port:            port,
+		Volumes:         mounts,
+		Accelerator:     req.Accelerator,
+		ContainerEngine: req.ContainerEngine,
+		Command:         req.Command,
 	}
 	if watchdogDir != "" {
 		host.Watchdog = &servespec.Watchdog{ScriptHostDir: watchdogDir, Project: project}
