@@ -318,6 +318,37 @@ func (h Host) amdGroupWarning(form string) []string {
 		form)}
 }
 
+// amdKeepGroupsWarning flags the quadlet-specific way an AMD container ends up
+// with no GPU.
+//
+// keep-groups hands through the groups the LAUNCHING process already has. From
+// an interactive shell that works, which is why the docker-run form is fine
+// once the caller is in video/render. Under systemd the launching process is
+// the USER MANAGER, whose credentials were fixed when the session began -- so
+// on a host where those groups were added later, the manager has neither,
+// keep-groups inherits nothing, and the unit starts a container with no GPU.
+//
+// Measured on this host: the systemd user manager's groups are 10 and 1001,
+// while render is 105 and video 39. The unit came up and vLLM died with
+// "RuntimeError: No CUDA GPUs are available" -- a message that says nothing
+// about group credentials.
+//
+// This is not something the spec can fix: a user manager cannot grant itself
+// supplementary groups, so the remedy is on the host (re-login, or run the unit
+// as a system quadlet). Saying so beats emitting a unit that looks correct and
+// silently has no accelerator.
+func (h Host) amdKeepGroupsWarning() []string {
+	if h.gpuVendor() != vendorAMD {
+		return nil
+	}
+	return []string{"this unit passes --group-add keep-groups, which inherits the groups of the process that LAUNCHES it. " +
+		"Under systemd that is the user manager, not your shell, and its credentials were fixed when the session began. " +
+		"If the manager is not in video/render — common when those groups were added after login — the container STARTS WITH NO GPU " +
+		"and vLLM fails with \"No CUDA GPUs are available\", which says nothing about group credentials. " +
+		"Check the manager's Groups line in /proc/<systemd --user pid>/status against the render and video GIDs. " +
+		"The remedy is on the host: re-login so the user manager picks up the groups, or run this as a system quadlet."}
+}
+
 // DockerRun renders a `docker run` (or `podman run`) invocation. The command
 // word follows ContainerEngine so the spec is runnable exactly as printed --
 // emitting "docker run" above podman-only flags would hand the operator a line
@@ -452,6 +483,7 @@ func writeWatchdogService(b *strings.Builder, h Host) {
 func Quadlet(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
 	var b strings.Builder
+	warnings = append(warnings, h.amdKeepGroupsWarning()...)
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("[Container]\n")
 	fmt.Fprintf(&b, "Image=%s\n", h.Image)
@@ -461,6 +493,9 @@ func Quadlet(r *servecontract.Resolved, h Host) string {
 		// rootless-podman way to carry the caller's video/render membership
 		// into the container: podman cannot map host GIDs into the user
 		// namespace, so the credentials are handed through directly.
+		//
+		// The catch, which amdKeepGroupsWarning explains: under systemd the
+		// caller is the user manager, not a shell.
 		b.WriteString("AddDevice=/dev/kfd\n")
 		b.WriteString("AddDevice=/dev/dri\n")
 		b.WriteString("PodmanArgs=--ipc host --group-add keep-groups\n")

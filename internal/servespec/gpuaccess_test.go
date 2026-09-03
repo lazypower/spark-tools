@@ -300,3 +300,29 @@ func TestQuadlet_CommandPrefixInExec(t *testing.T) {
 		t.Errorf("quadlet Exec must start with the command prefix\n%s", out)
 	}
 }
+
+// Quadlet has its own way to end up with no GPU, distinct from the Docker group
+// form: keep-groups inherits the LAUNCHING process's groups, and under systemd
+// that is the user manager, whose credentials were fixed at session start.
+// Measured on a host where the manager had neither video nor render, the unit
+// came up and vLLM died with "No CUDA GPUs are available".
+func TestQuadlet_AMDWarnsAboutSystemdKeepGroups(t *testing.T) {
+	out := Quadlet(resolvedFixture(), amdHost())
+
+	if !strings.Contains(out, "keep-groups") {
+		t.Fatalf("quadlet must still emit keep-groups\n%s", out)
+	}
+	for _, want := range []string{"user manager", "NO GPU", "No CUDA GPUs are available"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("quadlet AMD warning missing %q\n%s", want, out)
+		}
+	}
+}
+
+// The systemd caveat is AMD-specific; NVIDIA uses a runtime shim and no group
+// juggling, so the note must not leak there.
+func TestQuadlet_NVIDIANoKeepGroupsWarning(t *testing.T) {
+	if out := Quadlet(resolvedFixture(), nvidiaHost()); strings.Contains(out, "user manager") {
+		t.Errorf("NVIDIA quadlet must not carry the keep-groups caveat\n%s", out)
+	}
+}
