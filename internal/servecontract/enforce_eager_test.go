@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lazypower/spark-tools/internal/fingerprint"
+	"github.com/lazypower/spark-tools/internal/serveprofiles"
 	"github.com/lazypower/spark-tools/internal/serving"
 )
 
@@ -28,18 +29,20 @@ func denseFacts() serving.ArtifactFacts {
 	}
 }
 
-func TestResolve_StrixHalo_EmitsEnforceEager(t *testing.T) {
+// gfx1151 must NOT get --enforce-eager. It was seeded true from vLLM #32180
+// without measurement; on the engine this profile is stamped for, HIP graph
+// capture completes in 8s, serves, and returns correct output. Emitting the
+// flag would impose a throughput cost to prevent a crash that does not happen.
+func TestResolve_StrixHalo_DoesNotEmitEnforceEager(t *testing.T) {
 	res, err := Resolve(Request{ServedName: "m", Target: strixTarget}, denseFacts())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if !hasFlag(res.Flags, "--enforce-eager") {
-		t.Fatalf("gfx1151 launch must carry --enforce-eager, got %v", res.Flags)
+	if hasFlag(res.Flags, "--enforce-eager") {
+		t.Errorf("gfx1151 must not force eager on this engine build, got %v", res.Flags)
 	}
 }
 
-// The flag must not leak onto accelerators that do not need it -- it costs real
-// throughput.
 func TestResolve_GB10_OmitsEnforceEager(t *testing.T) {
 	res, err := Resolve(req("m"), qwenFacts())
 	if err != nil {
@@ -62,23 +65,26 @@ func TestResolve_UnknownAccelerator_OmitsEnforceEager(t *testing.T) {
 	}
 }
 
-// Drift must warn but must NOT withdraw the guard: eager execution is the
-// fail-safe direction, and dropping it on a drifted engine would turn a warning
-// into an engine crash.
-func TestResolve_StrixHalo_DriftedEngineStillEnforcesEagerAndWarns(t *testing.T) {
-	drifted := fingerprint.Fingerprint{
-		Engine:      "kyuz0/vllm-therock-gfx1151@0.99.0+future",
-		Accelerator: "amd:strix-halo:gfx1151",
+// No accelerator currently declares EnforceEager, but the LEVER must keep
+// working: the failure it guards (graph capture wedging a driver) is real, it
+// just does not occur on the engine gfx1151 is stamped for. Exercising
+// assembleFlags directly keeps the emission path covered without seeding a
+// requirement no measurement supports.
+func TestAssembleFlags_EmitsEnforceEagerWhenDeclared(t *testing.T) {
+	profile, ok := serveprofiles.Lookup("Qwen3MoeForCausalLM")
+	if !ok {
+		t.Fatal("fixture arch profile missing")
 	}
-	res, err := Resolve(Request{ServedName: "m", Target: drifted}, denseFacts())
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	r := Request{ServedName: "m", Target: strixTarget}
+
+	with := assembleFlags(r, denseFacts(), profile, nil, 0, 0, true)
+	if !hasFlag(with, "--enforce-eager") {
+		t.Errorf("a declared enforce-eager must reach the flags, got %v", with)
 	}
-	if !hasFlag(res.Flags, "--enforce-eager") {
-		t.Error("a drifted engine must still get the fail-safe flag")
-	}
-	if !hasEagerHWWarning(res.Warnings) {
-		t.Errorf("drift must produce a loud re-verify warning for the enforce-eager default, got %v", res.Warnings)
+
+	without := assembleFlags(r, denseFacts(), profile, nil, 0, 0, false)
+	if hasFlag(without, "--enforce-eager") {
+		t.Errorf("an undeclared enforce-eager must not appear, got %v", without)
 	}
 }
 
@@ -98,9 +104,8 @@ func TestResolve_StrixHalo_NoWarningOnMatchingEnvironment(t *testing.T) {
 //
 // It must not match the ARCH-profile staleness notice, whose generic text also
 // contains the words "enforce-eager need". That one fires on every AMD emit --
-// all arch profiles were authored against GB10, so any non-NVIDIA target drifts
-// them by construction -- and conflating the two would make this test assert
-// something it does not mean.
+// all arch profiles were authored against GB10 -- and conflating the two would
+// make this test assert something it does not mean.
 func hasEagerHWWarning(warnings []string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, `the enforce-eager default for accelerator`) {

@@ -81,16 +81,30 @@ var hardwareBuiltins = []HardwareProfile{
 		GPUMemUtil: 0,
 		MaxNumSeqs: 0,
 
-		// REQUIRED here. HIP graph capture on gfx1151 times out the driver and
-		// crashes the engine (vLLM #32180, open and AMD-assigned), so eager
-		// execution is not a tuning preference on this silicon — it is the
-		// difference between a launch that serves and one that dies. The cost
-		// is throughput, which is the right trade against an engine crash.
+		// UNSET, and this entry is the reason the staleness machinery exists.
 		//
-		// A visible consequence for any memory budgeter: with capture disabled
-		// the graph allocation is structurally 0.00 GiB on this accelerator,
-		// so a budget model must zero that term here rather than estimate it.
-		EnforceEager: true,
+		// It was first seeded true on vLLM #32180 (HIP graph capture times out
+		// the driver on gfx1151), taken from the issue and from this box's
+		// operating notes rather than from a measurement. Against the engine
+		// this profile is stamped for, that is no longer true. Measured on
+		// gfx1151 / vLLM 0.28.0+strix, serving with capture ENABLED:
+		//
+		//   Capturing CUDA graphs (PIECEWISE): 51/51, (FULL): 35/35
+		//   Graph capturing finished in 8 secs, took 0.45 GiB
+		//   Application startup complete — no driver timeout, no crash
+		//   output correct (17x3 -> 51; capital of Japan -> Tokyo)
+		//   152.2 tok/s median with capture vs 149.6 with --enforce-eager
+		//
+		// So the flag bought nothing here and cost a little throughput. Forcing
+		// it would be a fossil: a requirement that was real against an older
+		// engine, carried forward into one where it no longer holds, which is
+		// exactly what AuthoredAgainst is meant to catch. An older engine that
+		// still needs it will drift against this stamp and warn.
+		//
+		// The lever itself stays — the failure it guards against is real, just
+		// not on this engine build — so an accelerator that needs it can set it
+		// without reintroducing the plumbing.
+		EnforceEager: false,
 
 		// Stamped against the environment these values were measured on rather
 		// than the repo-wide seed, because they were asserted somewhere else

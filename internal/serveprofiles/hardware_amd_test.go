@@ -4,13 +4,17 @@ import "testing"
 
 const strixHalo = "amd:strix-halo:gfx1151"
 
-func TestLookupHardware_StrixHalo_RequiresEagerExecution(t *testing.T) {
+// enforce-eager was seeded true from vLLM #32180 without being measured. On the
+// engine this profile is stamped for it is simply false: capture completes in 8
+// seconds, serves, returns correct output, and is marginally FASTER than eager.
+// Forcing it would be a fossil.
+func TestLookupHardware_StrixHalo_DoesNotForceEager(t *testing.T) {
 	hw, ok := LookupHardware(strixHalo)
 	if !ok {
-		t.Fatal("gfx1151 must have a hardware profile: HIP graph capture crashes the engine there, and that is a fact about the accelerator")
+		t.Fatal("gfx1151 must still have a hardware profile")
 	}
-	if !hw.EnforceEager {
-		t.Error("gfx1151 must enforce eager execution (vLLM #32180: HIP graph capture times out the driver)")
+	if hw.EnforceEager {
+		t.Error("gfx1151 must not force eager: measured on vLLM 0.28.0+strix, HIP graph capture completes and serves correctly")
 	}
 }
 
