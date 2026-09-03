@@ -45,7 +45,7 @@ const qwen35DenseProvenance = "family inference from Qwen3_5MoeForConditionalGen
 // template to a measurement. Still `asserted` per §8.0: a manual acceptance is
 // strong evidence, but the `proven` verdict belongs to the v2 probe, not the
 // author.
-const qwen3CausalProvenance = "on-box acceptance, gfx1151 / vLLM 0.28.0+strix (2026-09-02): hermes parser returned a structured tool_call (finish_reason tool_calls, no tag leakage, no misfire without tools); qwen3 reasoning parser separated 4736 chars into message.reasoning with the answer clean in content. Vision:false remains artifact-derived (config carries no vision or image keys)"
+const qwen3CausalProvenance = "on-box acceptance, gfx1151 / vLLM 0.28.0+strix (2026-09-02/03): hermes parser returned a structured tool_call (finish_reason tool_calls, no tag leakage, no misfire without tools); qwen3 reasoning parser separated 4736 chars into message.reasoning; guided decoding via response_format json_schema returned schema-conforming JSON (finish_reason stop). Vision:false remains artifact-derived (config carries no vision or image keys)"
 
 // qwen3CausalFingerprint is the environment the Qwen3ForCausalLM entry was authored
 // on. It is NOT the repo-wide seed, because these claims were not authored
@@ -232,6 +232,14 @@ var builtins = []ArchProfile{
 	// reasoning as `reasoning`, NOT the older `reasoning_content` key. Looking
 	// for the wrong field makes a working parser look like it silently drops
 	// the model's thinking.
+	//
+	// Guided decoding is measured too: response_format json_schema returned
+	// {"city":"Tokyo","country":"Japan","population":37000000} with
+	// finish_reason "stop". One operational note that is easy to misread as a
+	// grammar failure -- vLLM's default disable_any_whitespace=False lets the
+	// grammar emit unbounded whitespace, so a tight max_tokens can be consumed
+	// by newlines and truncate mid-object, producing invalid JSON from a
+	// perfectly working grammar. Give structured requests headroom.
 	//
 	// Vision:false is still artifact-derived rather than measured -- the config
 	// carries no vision or image keys at all, so there is nothing to serve.
