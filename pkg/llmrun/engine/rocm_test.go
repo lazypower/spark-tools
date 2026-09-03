@@ -180,3 +180,29 @@ func TestDetectBackend_SilentGPUBuildLooksLikeCPU(t *testing.T) {
 		t.Errorf("device listing must identify the backend the prose omits, got %q", got)
 	}
 }
+
+// A device listing whose entries we cannot parse must NOT be reported as a
+// CPU-only build.
+//
+// This detector is verified on real hardware against ROCm and CPU-only builds,
+// but there is no NVIDIA hardware here to verify a CUDA device line against.
+// The two possible mistakes are not symmetric: calling an unparsed listing
+// "cpu" would refuse GPU offload on a working NVIDIA box, while falling back to
+// the previous prose sniffing merely restores the old behavior. This pins the
+// safe direction.
+func TestListedNoDevices_OnlyWhenExplicitlyNone(t *testing.T) {
+	if !listedNoDevices(emptyDeviceList) {
+		t.Error(`an "(none)" listing is a real CPU-only answer`)
+	}
+	if listedNoDevices(rocmDeviceList) {
+		t.Error("a listing WITH a device must not be read as no-devices")
+	}
+	// The shape that matters: a listing whose entry format we do not recognize.
+	unparseable := "Available devices:\n  some-future-backend => Accelerator X\n"
+	if listedNoDevices(unparseable) {
+		t.Error("an unparseable listing must not be treated as CPU-only; it must fall back")
+	}
+	if got := DetectBackendFromDevices(unparseable); got != "" {
+		t.Errorf("unparseable listing should yield no backend, got %q", got)
+	}
+}

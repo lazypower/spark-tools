@@ -89,11 +89,18 @@ func DetectBinaries(llamaDir string) (*Capabilities, error) {
 			if b := DetectBackendFromDevices(devices); b != "" {
 				caps.Backend = b
 				applyBackendArch(devices+"\n"+backendText, caps)
-			} else if devicesListed(devices) {
-				// The binary answered and listed no usable device. That is a
-				// real CPU-only answer, not a failed probe.
+			} else if listedNoDevices(devices) {
+				// The binary answered and explicitly listed no device. That is
+				// a real CPU-only answer, not a failed probe.
 				caps.Backend = "cpu"
 			}
+			// A listing we could not parse deliberately falls through to the
+			// prose-sniffed backend above rather than being called "cpu".
+			// This detector is verified against ROCm and CPU builds on real
+			// hardware but NOT against CUDA, and the two mistakes are not
+			// symmetric: guessing "cpu" for an unparsed listing would refuse
+			// GPU offload on a working NVIDIA box, while falling back merely
+			// restores the previous behavior. Fail toward the old path.
 		} else if backendText != "" {
 			// Older builds without --list-devices: fall back to the prose.
 			caps.Backend = DetectBackend(backendText)
@@ -330,6 +337,17 @@ func probeDevices(binaryPath string) (string, error) {
 // empty list can be distinguished from a binary that does not support the flag.
 func devicesListed(out string) bool {
 	return strings.Contains(strings.ToLower(out), "available devices")
+}
+
+// listedNoDevices reports the narrower fact that the binary answered AND said
+// it has no devices. Verified against both a ROCm build with the GPU detached
+// and a CPU-only build, which print the same "(none)" entry.
+//
+// This is deliberately stricter than devicesListed: a listing whose device
+// lines we simply failed to parse is NOT evidence of a CPU-only build, and
+// treating it as one would refuse GPU offload on a working accelerator.
+func listedNoDevices(out string) bool {
+	return devicesListed(out) && strings.Contains(out, "(none)")
 }
 
 // DetectBackendFromDevices returns the backend named by the first device entry,
