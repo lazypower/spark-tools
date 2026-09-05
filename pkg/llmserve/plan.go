@@ -102,7 +102,15 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error)
 		ContractKey:   resolved.Key,
 		Target:        fingerprint.Fingerprint{Engine: req.Image, Accelerator: req.Accelerator},
 		ProjectName:   project,
-		Endpoint:      fmt.Sprintf("http://localhost:%d", port),
+		// 127.0.0.1, not "localhost". Rootless podman publishes through pasta,
+		// which maps IPv4 only, while "localhost" resolves to ::1 first and the
+		// probe gets connection-reset against a server that is demonstrably
+		// healthy — measured here as localhost:8000/health failing while
+		// 127.0.0.1:8000/health returned 200 from the same shell. The literal
+		// loopback address is also correct on docker hosts, which publish on
+		// 0.0.0.0, so this is strictly safer everywhere rather than a podman
+		// special case.
+		Endpoint: fmt.Sprintf("http://127.0.0.1:%d", port),
 	}
 
 	// Host without labels first, so the spec hash (a label) is computed over the
@@ -122,7 +130,12 @@ func BuildPlan(req PlanRequest) (lifecycle.Plan, *servecontract.Resolved, error)
 
 	// Now stamp the identity labels (which include the spec hash) and render.
 	host.Labels = lifecycle.IdentityLabels(desired)
-	spec, err := servespec.Render(servespec.TargetCompose, resolved, host)
+	// The render target must match the driver that will apply it.
+	target := servespec.TargetCompose
+	if req.ContainerEngine == "podman" {
+		target = servespec.TargetPodman
+	}
+	spec, err := servespec.Render(target, resolved, host)
 	if err != nil {
 		return lifecycle.Plan{}, nil, err
 	}

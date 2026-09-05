@@ -24,14 +24,26 @@ RESTART_WINDOW="${RESTART_WINDOW:-3600}"  # rolling window (s) for the storm gua
 HEARTBEAT="${HEARTBEAT:-600}"             # log an "alive" line this often (s)
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-vllm}"
 COMPOSE_SERVICE="${COMPOSE_SERVICE:-vllm}"
+# CTR is the container CLI used to find and restart the engine. podman is
+# CLI-compatible for the three verbs used here (ps -q -f label=, logs, restart),
+# so the only thing differing between engines is the binary name and its socket.
+CTR="${CTR:-docker}"
 
 log() { echo "[watchdog $(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 
-healthy() { wget -qO- -T 5 "$VLLM_URL/health" >/dev/null 2>&1; }
+# Some engine images ship curl and not wget, so the watchdog must not depend on
+# whichever one its base image happened to include.
+if command -v wget >/dev/null 2>&1; then
+  http_get() { wget -qO- -T 5 "$1" 2>/dev/null; }
+else
+  http_get() { curl -fsS --max-time 5 "$1" 2>/dev/null; }
+fi
+
+healthy() { http_get "$VLLM_URL/health" >/dev/null 2>&1; }
 
 # echoes "<running> <prompt+generation tokens>"; always two integers
 snapshot() {
-  wget -qO- -T 5 "$VLLM_URL/metrics" 2>/dev/null | awk '
+  http_get "$VLLM_URL/metrics" | awk '
     /^vllm:num_requests_running\{/    { r=$NF }
     /^vllm:prompt_tokens_total\{/     { p=$NF }
     /^vllm:generation_tokens_total\{/ { g=$NF }
@@ -39,7 +51,7 @@ snapshot() {
 }
 
 target_cid() {
-  docker ps -q \
+  $CTR ps -q \
     -f "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     -f "label=com.docker.compose.service=$COMPOSE_SERVICE" | head -n1
 }
@@ -54,7 +66,7 @@ wait_ready() {
   return 1
 }
 
-log "starting: url=$VLLM_URL poll=${POLL_INTERVAL}s stall_window=${STALL_WINDOW}s grace=${STARTUP_GRACE}s guard=${MAX_RESTARTS}/${RESTART_WINDOW}s"
+log "starting: ctr=$CTR url=$VLLM_URL poll=${POLL_INTERVAL}s stall_window=${STALL_WINDOW}s grace=${STARTUP_GRACE}s guard=${MAX_RESTARTS}/${RESTART_WINDOW}s"
 sleep "$INITIAL_PAUSE"
 wait_ready
 
@@ -111,9 +123,9 @@ while true; do
     log "WEDGED: running=$running, token counter flat at $progress for ${stall}s. Restart #${restart_count}/${MAX_RESTARTS} (cid=${cid:-NOT-FOUND})."
     if [ -n "$cid" ]; then
       log "---- vllm log tail (pre-restart) ----"
-      docker logs --tail 20 "$cid" 2>&1 | sed 's/^/[vllm] /'
+      $CTR logs --tail 20 "$cid" 2>&1 | sed 's/^/[vllm] /'
       log "---- end tail ----"
-      if docker restart "$cid" >/dev/null 2>&1; then log "restart issued."; else log "ERROR: docker restart failed."; fi
+      if $CTR restart "$cid" >/dev/null 2>&1; then log "restart issued."; else log "ERROR: $CTR restart failed."; fi
     else
       log "ERROR: vllm container not found by compose label ($COMPOSE_PROJECT/$COMPOSE_SERVICE)."
     fi

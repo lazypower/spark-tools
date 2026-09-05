@@ -78,7 +78,7 @@ func (c *Compose) Inspect(ctx context.Context, projectName, specPath string) (Ru
 		return RuntimeState{Exists: false}, nil
 	}
 
-	services, err := inspectContainers(ctx, ids)
+	services, err := inspectContainers(ctx, "docker", ids)
 	if err != nil {
 		return RuntimeState{}, err
 	}
@@ -96,7 +96,7 @@ func (c *Compose) ListRunning(ctx context.Context) ([]ServiceState, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return inspectContainers(ctx, ids)
+	return inspectContainers(ctx, "docker", ids)
 }
 
 // dockerPS returns the IDs of llm-serve-managed containers for a compose project.
@@ -114,11 +114,11 @@ func (c *Compose) dockerPS(ctx context.Context, projectName string) ([]byte, err
 // inspectContainers runs `docker inspect` over container IDs and parses each into
 // a ServiceState (name, running, restart count, labels). Shared by Inspect and
 // ListManaged.
-func inspectContainers(ctx context.Context, ids []string) ([]ServiceState, error) {
+func inspectContainers(ctx context.Context, bin string, ids []string) ([]ServiceState, error) {
 	args := append([]string{"inspect", "--format", "{{json .}}"}, ids...)
-	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	out, err := exec.CommandContext(ctx, bin, args...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("docker inspect: %w", err)
+		return nil, fmt.Errorf("%s inspect: %w", bin, err)
 	}
 	var services []ServiceState
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {

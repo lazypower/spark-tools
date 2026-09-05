@@ -45,8 +45,13 @@ func upCmd() *cobra.Command {
 			"against the served model + watchdog). Fail-closed: a bring-up that does not confirm\n" +
 			"is torn down (or kept as a recovery handle if teardown can't be confirmed).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if target != "" && target != "compose" {
-				return fmt.Errorf("B1 drives compose only; --target %q not supported", target)
+			// The driver applies the spec, so only targets a driver exists for
+			// are accepted. An explicit target must also agree with the engine:
+			// handing compose YAML to the podman driver (or the reverse) fails
+			// in the driver rather than at the CLI, which is a worse place to
+			// find out.
+			if target != "" && target != "compose" && target != "podman" {
+				return fmt.Errorf("up drives compose or podman; --target %q not supported", target)
 			}
 			if err := validateBudgetFlags(cmd); err != nil {
 				return err
@@ -94,7 +99,7 @@ func upCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
 
-			orch := llmserve.NewOrchestrator(stateDir, specDir)
+			orch := llmserve.NewOrchestratorFor(stateDir, specDir, ctrEngine)
 			orch.BootTimeout = timeout // 0 ⇒ the orchestrator's generous default
 			fmt.Fprintf(cmd.ErrOrStderr(), "bringing up %q (waiting for confirmed serving; large models cold-start in minutes, fail-fast on crash)...\n", name)
 			res, err := orch.Up(context.Background(), plan)
@@ -119,7 +124,7 @@ func upCmd() *cobra.Command {
 	f.StringVar(&engineCmd, "engine-command", "", "argv prefix between the image and the flags, for images whose entrypoint does not start the server (e.g. \"vllm serve\")")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")
-	f.StringVar(&target, "target", "compose", "render target (B1: compose only)")
+	f.StringVar(&target, "target", "", "render target: compose or podman; unset follows the detected container engine")
 	f.StringVar(&repoTree, "repo-tree", "", "saved hfetch tree listing (JSON) to run the completeness gate")
 	f.DurationVar(&timeout, "timeout", 0, "ceiling for reaching confirmed serving (0 = default 20m; a crashed container fails fast regardless)")
 	_ = cmd.MarkFlagRequired("model-dir")

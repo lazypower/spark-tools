@@ -521,11 +521,14 @@ const (
 	TargetCompose   Target = "compose"
 	TargetDockerRun Target = "docker-run"
 	TargetQuadlet   Target = "quadlet"
+	// TargetPodman is the machine-readable spec the podman runtime driver
+	// applies directly, for hosts with no compose implementation.
+	TargetPodman Target = "podman"
 )
 
 // Targets returns the supported render targets in stable order.
 func Targets() []Target {
-	t := []Target{TargetCompose, TargetDockerRun, TargetQuadlet}
+	t := []Target{TargetCompose, TargetDockerRun, TargetPodman, TargetQuadlet}
 	slices.Sort(t)
 	return t
 }
@@ -573,8 +576,10 @@ func Render(target Target, r *servecontract.Resolved, h Host) (string, error) {
 		return DockerRun(r, h), nil
 	case TargetQuadlet:
 		return Quadlet(r, h), nil
+	case TargetPodman:
+		return PodmanJSON(r, h), nil
 	default:
-		return "", fmt.Errorf("unknown render target %q (have: compose, docker-run, quadlet)", target)
+		return "", fmt.Errorf("unknown render target %q (have: compose, docker-run, podman, quadlet)", target)
 	}
 }
 
