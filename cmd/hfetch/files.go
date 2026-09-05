@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
@@ -17,12 +18,39 @@ func filesCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			quantFilter, _ := cmd.Flags().GetString("quant")
+			asJSON, _ := cmd.Flags().GetBool("json")
 
 			client := newAPIClient(cmd)
 
 			files, err := client.ListFiles(context.Background(), args[0])
 			if err != nil {
 				return err
+			}
+
+			// The JSON form is the repo tree llm-serve's completeness gate
+			// consumes (`llm-serve emit --repo-tree`), so it emits the WHOLE
+			// tree and applies none of the filters below. Those exist to make
+			// the human table readable -- the default one hides everything that
+			// is not GGUF.
+			//
+			// Measured, because the failure direction is not the obvious one:
+			// the gate validates the TREE for serve-readiness, not just the
+			// tree against the disk, so a filtered tree fails CLOSED rather
+			// than passing a bad artifact. Feeding a GGUF-filtered (empty) tree
+			// for a safetensors repo produced
+			//
+			//   *.safetensors: no safetensors weights and no index in repo
+			//   config.json: required file not in repo
+			//   tokenizer: no tokenizer file in repo
+			//
+			// against a repo that has all three. So the hazard is not a silent
+			// pass, it is a confident and completely wrong REJECTION that sends
+			// the operator looking for missing files that are present. Either
+			// way the gate needs the real tree; it just fails the safer way.
+			if asJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(files)
 			}
 
 			headerStyle := lipgloss.NewStyle().Bold(true)
@@ -98,6 +126,7 @@ func filesCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("quant", "", "Filter by quantization type")
+	cmd.Flags().Bool("json", false, "emit the full repo tree as JSON, for `llm-serve emit --repo-tree` (unfiltered: the completeness gate needs every file)")
 	cmd.Flags().String("min-size", "", "Minimum file size")
 	cmd.Flags().String("max-size", "", "Maximum file size")
 	tokenFlag(cmd)

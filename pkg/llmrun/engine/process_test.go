@@ -9,7 +9,7 @@ import (
 // fakeCmd implements interface{ Wait() error } for testing the reaper.
 type fakeCmd struct {
 	waitCh chan struct{} // closed when Wait should return
-	err    error        // error to return from Wait
+	err    error         // error to return from Wait
 }
 
 func (f *fakeCmd) Wait() error {

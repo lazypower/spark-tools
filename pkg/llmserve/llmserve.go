@@ -95,9 +95,18 @@ func Targets() []servespec.Target { return servespec.Targets() }
 // NewOrchestrator wires the B1 lifecycle over the real compose runtime and HTTP
 // prober, with manifests under stateDir and emitted specs under specDir.
 func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
+	return NewOrchestratorFor(stateDir, specDir, runtime.DetectEngine())
+}
+
+// NewOrchestratorFor wires the lifecycle over the driver for a named container
+// engine. `up` already resolves the engine for rendering, and the driver must
+// agree with it: a podman spec handed to the compose driver is unusable, and a
+// compose spec handed to the podman driver is worse — it would parse as JSON and
+// fail, or on a host with no compose at all the bring-up dies in the driver.
+func NewOrchestratorFor(stateDir, specDir, engine string) *lifecycle.Orchestrator {
 	return &lifecycle.Orchestrator{
 		Store:   serveinstance.NewStore(stateDir),
-		Runtime: runtime.NewCompose(),
+		Runtime: runtime.For(engine),
 		Prober:  runtime.NewHTTPProber(),
 		SpecDir: specDir,
 	}
@@ -107,7 +116,10 @@ func NewOrchestrator(stateDir, specDir string) *lifecycle.Orchestrator {
 // real compose runtime. It answers "is this artifact protected from eviction?"
 // for tools like llm-tidy — derived live, fail-closed.
 func NewLiveness(stateDir string) *liveness.Liveness {
-	return liveness.New(serveinstance.NewStore(stateDir), runtime.NewCompose())
+	// Liveness must use the engine that actually runs the containers, or it
+	// cannot see them and fails closed — protecting every artifact on the host
+	// and making eviction impossible.
+	return liveness.New(serveinstance.NewStore(stateDir), runtime.For(runtime.DetectEngine()))
 }
 
 // EnsureWatchdogScript writes the embedded watchdog.sh into dir (idempotently) so

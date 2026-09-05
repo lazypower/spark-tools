@@ -23,12 +23,23 @@ type HardwareInfo struct {
 	NUMANodes     int       `json:"numaNodes"`
 }
 
+// GPU vendors detection can report. The vendor is carried explicitly because
+// downstream policy is vendor-specific -- the accelerator fingerprint, the
+// llama.cpp backend, and the flags a serving engine needs all differ -- and
+// inferring it back out of a name string is fragile.
+const (
+	VendorNVIDIA = "nvidia"
+	VendorAMD    = "amd"
+)
+
 // GPUInfo describes a detected GPU.
 type GPUInfo struct {
 	Index    int     `json:"index"`
+	Vendor   string  `json:"vendor,omitempty"`   // "nvidia" or "amd"
+	DeviceID int64   `json:"deviceId,omitempty"` // PCI device ID, when known
 	Name     string  `json:"name"`
 	MemoryGB float64 `json:"memoryGB"`
-	Compute  string  `json:"compute,omitempty"` // e.g. "sm_100" for GB10
+	Compute  string  `json:"compute,omitempty"` // e.g. "sm_100" for GB10, "gfx1151" for Strix Halo
 }
 
 // DetectHardware probes the current system for CPU, memory, GPU, and NUMA
@@ -227,9 +238,20 @@ func parseVMStatValue(line string) int64 {
 	return val
 }
 
-// detectGPUs queries nvidia-smi for GPU information.
-// Returns nil (not an error) if nvidia-smi is unavailable.
+// detectGPUs probes every GPU vendor we know how to detect and returns the
+// first that reports a device. NVIDIA is probed first only because it is the
+// cheaper check to fail; the two probes are independent and neither implies the
+// other is absent.
 func detectGPUs() []GPUInfo {
+	if gpus := detectGPUsNVIDIA(); len(gpus) > 0 {
+		return gpus
+	}
+	return detectGPUsAMD()
+}
+
+// detectGPUsNVIDIA queries nvidia-smi for GPU information.
+// Returns nil (not an error) if nvidia-smi is unavailable.
+func detectGPUsNVIDIA() []GPUInfo {
 	// Query: index, name, memory.total (MiB), compute capability
 	out, err := exec.Command(
 		"nvidia-smi",
@@ -278,6 +300,7 @@ func parseNvidiaSMILine(line string) (GPUInfo, error) {
 
 	gpu := GPUInfo{
 		Index:    idx,
+		Vendor:   VendorNVIDIA,
 		Name:     name,
 		MemoryGB: memMiB / 1024.0,
 	}

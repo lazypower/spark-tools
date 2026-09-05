@@ -52,8 +52,36 @@ type Host struct {
 	Image string
 	// Port is the host port mapped to the container's 8000. Defaults to 8000.
 	Port int
-	// Runtime is the container runtime label (e.g. "nvidia"). Defaults to "nvidia".
+	// Runtime is the container runtime label (e.g. "nvidia"). Defaults to
+	// "nvidia". It is only meaningful for vendors that use a runtime shim; ROCm
+	// exposes the GPU by device passthrough and has no runtime to name.
 	Runtime string
+	// Command is the argv prefix placed between the image and the validated
+	// flags, for images whose entrypoint does not already start the server.
+	//
+	// The official vllm/vllm-openai image sets ENTRYPOINT ["vllm","serve"], so
+	// flags can follow the image directly and this stays empty -- which is why
+	// it defaults to empty and changes nothing for that image. Community images
+	// often do not: the main gfx1151 ROCm image (kyuz0/vllm-therock-gfx1151)
+	// has an empty entrypoint and CMD [/bin/bash], so a spec that appends bare
+	// flags makes the runtime try to exec "--model" as a program. Setting
+	// Command to {"vllm","serve"} is what makes such an image launchable.
+	Command []string
+	// ContainerEngine is the engine that will actually run this spec: "docker"
+	// (default) or "podman". It is NOT the OCI runtime (crun/runc) and NOT the
+	// vLLM engine image -- it is which CLI the operator drives.
+	//
+	// It matters for exactly one thing today, and only on AMD: how the GPU is
+	// handed to the container. Docker maps host GIDs, so naming the video and
+	// render groups works. Rootless podman cannot, so naming groups silently
+	// yields a container with no GPU and keep-groups is the only form that
+	// works. Getting this wrong does not error -- it just runs on the CPU.
+	ContainerEngine string
+	// Accelerator is the target accelerator fingerprint ("vendor:arch:compute",
+	// e.g. "amd:strix-halo:gfx1151"). Only its vendor dimension is used here, to
+	// decide how the container is given the GPU. Empty means NVIDIA, preserving
+	// the behavior from before any other vendor was renderable.
+	Accelerator string
 	// Volumes maps host paths to container paths (read-only model mounts).
 	Volumes []Mount
 	// ServiceName is the compose/quadlet service name. Defaults to "vllm".
@@ -105,6 +133,48 @@ func (h Host) runtime() string {
 	return h.Runtime
 }
 
+// gpuVendor returns the vendor dimension of the accelerator fingerprint. An
+// unset accelerator answers "nvidia" so existing specs render byte-identically
+// to what they did before GPU access was vendor-aware.
+func (h Host) gpuVendor() string {
+	if i := strings.IndexByte(h.Accelerator, ':'); i > 0 {
+		return h.Accelerator[:i]
+	}
+	return vendorNVIDIA
+}
+
+const (
+	vendorNVIDIA = "nvidia"
+	vendorAMD    = "amd"
+)
+
+// Container engines whose AMD GPU-access form differs.
+const (
+	engineDocker = "docker"
+	enginePodman = "podman"
+)
+
+// containerEngine returns the engine this spec is rendered for, defaulting to
+// docker so an unset field renders exactly what it always did.
+func (h Host) containerEngine() string {
+	if h.ContainerEngine == "" {
+		return engineDocker
+	}
+	return h.ContainerEngine
+}
+
+// amdDeviceArgs returns the CLI flags that hand an AMD GPU to the container for
+// the target engine. Podman gets keep-groups (crun's
+// run.oci.keep_original_groups), which passes the caller's existing group
+// credentials straight through instead of trying to map GIDs that rootless
+// podman cannot map.
+func (h Host) amdDeviceArgs() []string {
+	if h.containerEngine() == enginePodman {
+		return []string{"--device /dev/kfd --device /dev/dri", "--group-add keep-groups"}
+	}
+	return []string{"--device /dev/kfd --device /dev/dri", "--group-add video --group-add render"}
+}
+
 func (h Host) service() string {
 	if h.ServiceName == "" {
 		return "vllm"
@@ -127,7 +197,7 @@ func planLaunch(r *servecontract.Resolved, h Host) (flags []string, warnings []s
 
 	mi := flagIndex(flags, "--model")
 	if mi < 0 || mi+1 >= len(flags) {
-		return flags, warnings
+		return h.withCommand(flags), warnings
 	}
 	hostPath := flags[mi+1]
 	cp, ok := containerPath(hostPath, h.Volumes)
@@ -135,7 +205,7 @@ func planLaunch(r *servecontract.Resolved, h Host) (flags []string, warnings []s
 		warnings = append(warnings, fmt.Sprintf(
 			"--model %s is not covered by any volume mount; the container will not find the model — add a matching --mount <hostdir>:<containerdir>",
 			hostPath))
-		return flags, warnings
+		return h.withCommand(flags), warnings
 	}
 	flags[mi+1] = cp
 
@@ -144,7 +214,19 @@ func planLaunch(r *servecontract.Resolved, h Host) (flags []string, warnings []s
 	if si := flagIndex(flags, "--served-model-name"); si >= 0 && si+1 < len(flags) && flags[si+1] != cp {
 		flags = slices.Insert(flags, si+2, cp)
 	}
-	return flags, warnings
+	return h.withCommand(flags), warnings
+}
+
+// withCommand prepends the image's command prefix to the validated flags. Empty
+// Command returns the flags untouched, so the official-image path -- and its
+// spec hash -- is byte-identical to before this existed.
+func (h Host) withCommand(flags []string) []string {
+	if len(h.Command) == 0 {
+		return flags
+	}
+	out := make([]string, 0, len(h.Command)+len(flags))
+	out = append(out, h.Command...)
+	return append(out, flags...)
 }
 
 // flagIndex returns the position of a flag token, or -1.
@@ -198,15 +280,98 @@ func warningComment(warnings []string, prefix string) string {
 	return b.String()
 }
 
-// DockerRun renders a `docker run` invocation. Flags from the contract are
+// amdGroupWarning flags a GPU-access form that is correct for Docker and
+// silently wrong for rootless podman.
+//
+// Naming groups (--group-add video/render, or compose group_add) is the Docker
+// way to hand a container the KFD and DRM device groups. Rootless podman cannot
+// map host GIDs into the user namespace, so naming a group there does nothing:
+// the container starts, the device nodes are present, and rocminfo finds no
+// agent. Nothing errors -- the launch just has no GPU, which is the worst shape
+// a failure can take.
+//
+// Measured on gfx1151 (rootless podman): group names fail with or without fresh
+// credentials; --group-add keep-groups works; --security-opt seccomp=unconfined
+// is NOT required for device access. The quadlet target, being podman-native,
+// already emits keep-groups.
+//
+// This warns rather than switching form because the correct answer depends on
+// the runtime actually used, which the spec cannot know: keep-groups is
+// podman-only and Docker rejects it, so silently emitting it would break the
+// Docker case to fix the podman one.
+func (h Host) amdGroupWarning(form string) []string {
+	if h.gpuVendor() != vendorAMD {
+		return nil
+	}
+	// A spec rendered FOR podman already carries keep-groups; warning about a
+	// form it does not use would be noise, and noise is what gets warnings
+	// ignored.
+	if h.containerEngine() == enginePodman {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"under ROOTLESS PODMAN this spec STARTS SUCCESSFULLY AND RUNS THE ENGINE WITH NO GPU. It does not error and nothing in the logs "+
+			"says the accelerator is missing, so the usual outcome is the launch being written off as slow hardware. "+
+			"AMD GPU access is rendered here as %s, which is the Docker form; podman cannot map host GIDs into the user namespace, so naming "+
+			"groups does nothing and rocminfo finds no agent inside the container. Re-emit with --container-engine podman to render the working form. "+
+			"Measured on gfx1151: keep-groups works, group names do not (with or without fresh credentials), and --security-opt seccomp=unconfined is not required.",
+		form)}
+}
+
+// amdKeepGroupsWarning flags the quadlet-specific way an AMD container ends up
+// with no GPU.
+//
+// keep-groups hands through the groups the LAUNCHING process already has. From
+// an interactive shell that works, which is why the docker-run form is fine
+// once the caller is in video/render. Under systemd the launching process is
+// the USER MANAGER, whose credentials were fixed when the session began -- so
+// on a host where those groups were added later, the manager has neither,
+// keep-groups inherits nothing, and the unit starts a container with no GPU.
+//
+// Measured on this host: the systemd user manager's groups are 10 and 1001,
+// while render is 105 and video 39. The unit came up and vLLM died with
+// "RuntimeError: No CUDA GPUs are available" -- a message that says nothing
+// about group credentials.
+//
+// This is not something the spec can fix: a user manager cannot grant itself
+// supplementary groups, so the remedy is on the host (re-login, or run the unit
+// as a system quadlet). Saying so beats emitting a unit that looks correct and
+// silently has no accelerator.
+func (h Host) amdKeepGroupsWarning() []string {
+	if h.gpuVendor() != vendorAMD {
+		return nil
+	}
+	return []string{"this unit passes --group-add keep-groups, which inherits the groups of the process that LAUNCHES it. " +
+		"Under systemd that is the user manager, not your shell, and its credentials were fixed when the session began. " +
+		"If the manager is not in video/render — common when those groups were added after login — the container STARTS WITH NO GPU " +
+		"and vLLM fails with \"No CUDA GPUs are available\", which says nothing about group credentials. " +
+		"Check the manager's Groups line in /proc/<systemd --user pid>/status against the render and video GIDs. " +
+		"The remedy is on the host: re-login so the user manager picks up the groups, or run this as a system quadlet."}
+}
+
+// DockerRun renders a `docker run` (or `podman run`) invocation. The command
+// word follows ContainerEngine so the spec is runnable exactly as printed --
+// emitting "docker run" above podman-only flags would hand the operator a line
+// that docker rejects. Flags from the contract are
 // emitted verbatim after the image; host facts (runtime, port, mounts) precede
 // it. Long lines are continued for readability.
 func DockerRun(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
+	warnings = append(warnings, h.amdGroupWarning("--group-add video --group-add render")...)
 	var b strings.Builder
 	b.WriteString(warningComment(warnings, "#"))
-	b.WriteString("docker run -d \\\n")
-	fmt.Fprintf(&b, "  --runtime %s --gpus all \\\n", h.runtime())
+	fmt.Fprintf(&b, "%s run -d \\\n", h.containerEngine())
+	// How the container is handed the GPU is vendor-specific. NVIDIA injects a
+	// runtime shim; ROCm has no shim and instead needs the KFD compute node and
+	// the DRM render nodes passed through, with the caller in the groups that
+	// own them.
+	if h.gpuVendor() == vendorAMD {
+		for _, a := range h.amdDeviceArgs() {
+			fmt.Fprintf(&b, "  %s \\\n", a)
+		}
+	} else {
+		fmt.Fprintf(&b, "  --runtime %s --gpus all \\\n", h.runtime())
+	}
 	b.WriteString("  --ipc host \\\n")
 	fmt.Fprintf(&b, "  -p %d:8000 \\\n", h.port())
 	for _, m := range h.Volumes {
@@ -232,15 +397,29 @@ func DockerRun(r *servecontract.Resolved, h Host) string {
 // emitted — that is runtime supervision (v2 B); v1 emits only the engine service.
 func Compose(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
+	warnings = append(warnings, h.amdGroupWarning("group_add: [video, render]")...)
 	var b strings.Builder
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("services:\n")
 	fmt.Fprintf(&b, "  %s:\n", h.service())
 	fmt.Fprintf(&b, "    image: %s\n", h.Image)
-	fmt.Fprintf(&b, "    runtime: %s\n", h.runtime())
+	if h.gpuVendor() != vendorAMD {
+		fmt.Fprintf(&b, "    runtime: %s\n", h.runtime())
+	}
 	b.WriteString("    restart: unless-stopped\n")
-	b.WriteString("    deploy:\n      resources:\n        reservations:\n          devices:\n")
-	b.WriteString("            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n")
+	if h.gpuVendor() == vendorAMD {
+		// ROCm has no device driver to reserve through compose's deploy block;
+		// the GPU arrives as passed-through device nodes.
+		b.WriteString("    devices:\n      - /dev/kfd\n      - /dev/dri\n")
+		if h.containerEngine() == enginePodman {
+			b.WriteString("    group_add:\n      - keep-groups\n")
+		} else {
+			b.WriteString("    group_add:\n      - video\n      - render\n")
+		}
+	} else {
+		b.WriteString("    deploy:\n      resources:\n        reservations:\n          devices:\n")
+		b.WriteString("            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n")
+	}
 	b.WriteString("    ipc: host\n")
 	b.WriteString("    ports:\n")
 	fmt.Fprintf(&b, "      - \"%d:8000\"\n", h.port())
@@ -304,11 +483,25 @@ func writeWatchdogService(b *strings.Builder, h Host) {
 func Quadlet(r *servecontract.Resolved, h Host) string {
 	flags, warnings := planLaunch(r, h)
 	var b strings.Builder
+	warnings = append(warnings, h.amdKeepGroupsWarning()...)
 	b.WriteString(warningComment(warnings, "#"))
 	b.WriteString("[Container]\n")
 	fmt.Fprintf(&b, "Image=%s\n", h.Image)
 	fmt.Fprintf(&b, "PublishPort=%d:8000\n", h.port())
-	b.WriteString("PodmanArgs=--ipc host --gpus all\n")
+	if h.gpuVendor() == vendorAMD {
+		// Quadlet expresses passthrough as AddDevice. keep-groups is the
+		// rootless-podman way to carry the caller's video/render membership
+		// into the container: podman cannot map host GIDs into the user
+		// namespace, so the credentials are handed through directly.
+		//
+		// The catch, which amdKeepGroupsWarning explains: under systemd the
+		// caller is the user manager, not a shell.
+		b.WriteString("AddDevice=/dev/kfd\n")
+		b.WriteString("AddDevice=/dev/dri\n")
+		b.WriteString("PodmanArgs=--ipc host --group-add keep-groups\n")
+	} else {
+		b.WriteString("PodmanArgs=--ipc host --gpus all\n")
+	}
 	for _, m := range h.Volumes {
 		fmt.Fprintf(&b, "Volume=%s:%s:ro\n", m.Host, m.Container)
 	}
@@ -328,11 +521,14 @@ const (
 	TargetCompose   Target = "compose"
 	TargetDockerRun Target = "docker-run"
 	TargetQuadlet   Target = "quadlet"
+	// TargetPodman is the machine-readable spec the podman runtime driver
+	// applies directly, for hosts with no compose implementation.
+	TargetPodman Target = "podman"
 )
 
 // Targets returns the supported render targets in stable order.
 func Targets() []Target {
-	t := []Target{TargetCompose, TargetDockerRun, TargetQuadlet}
+	t := []Target{TargetCompose, TargetDockerRun, TargetPodman, TargetQuadlet}
 	slices.Sort(t)
 	return t
 }
@@ -350,6 +546,14 @@ func SpecHash(r *servecontract.Resolved, h Host) string {
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(&b, "image=%s\nport=%d\n", h.Image, h.port())
+	// GPU access is part of what makes a spec what it is, but adding it
+	// unconditionally would change every existing hash and orphan running
+	// NVIDIA instances from their identity labels. Emitting the line only for
+	// other vendors distinguishes an AMD spec while leaving the historical
+	// hashes byte-identical.
+	if v := h.gpuVendor(); v != vendorNVIDIA {
+		fmt.Fprintf(&b, "gpu=%s\n", v)
+	}
 	mounts := make([]string, 0, len(h.Volumes))
 	for _, m := range h.Volumes {
 		mounts = append(mounts, m.Host+":"+m.Container)
@@ -372,8 +576,10 @@ func Render(target Target, r *servecontract.Resolved, h Host) (string, error) {
 		return DockerRun(r, h), nil
 	case TargetQuadlet:
 		return Quadlet(r, h), nil
+	case TargetPodman:
+		return PodmanJSON(r, h), nil
 	default:
-		return "", fmt.Errorf("unknown render target %q (have: compose, docker-run, quadlet)", target)
+		return "", fmt.Errorf("unknown render target %q (have: compose, docker-run, podman, quadlet)", target)
 	}
 }
 

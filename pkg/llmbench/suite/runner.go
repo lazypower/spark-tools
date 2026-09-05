@@ -5,6 +5,7 @@ package suite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lazypower/spark-tools/pkg/llmbench/job"
@@ -21,14 +22,14 @@ type ProgressFunc func(current, total int, jobID string, status string)
 type RunnerOption func(*runnerConfig)
 
 type runnerConfig struct {
-	engine     *llmrun.Engine
-	store      *store.Store
-	outputDir  string
-	progressFn ProgressFunc
-	skipCheck  bool
-	dirtyMode  syscheck.DirtyMode
+	engine       *llmrun.Engine
+	store        *store.Store
+	outputDir    string
+	progressFn   ProgressFunc
+	skipCheck    bool
+	dirtyMode    syscheck.DirtyMode
 	continueFrom string
-	jobFilter  []string
+	jobFilter    []string
 }
 
 // WithEngine sets the llm-run engine for launching servers.
@@ -121,7 +122,7 @@ func (r *Runner) Run(ctx context.Context, s *BenchmarkSuite) (*store.RunResult, 
 		}
 		pfResult := syscheck.RunPreflight(ctx, dirtyMode, r.cfg.outputDir)
 		if !pfResult.Passed {
-			return nil, fmt.Errorf("pre-flight checks failed: %s", pfResult.Results[0].Message)
+			return nil, fmt.Errorf("pre-flight checks failed: %s", preflightFailureReason(pfResult))
 		}
 	}
 
@@ -293,4 +294,31 @@ func (r *Runner) resolvePrompts(ps PromptSet) ([]string, error) {
 		return ps.Inline, nil
 	}
 	return nil, fmt.Errorf("no prompt source specified")
+}
+
+// preflightFailureReason names the checks that actually FAILED.
+//
+// This used to report Results[0].Message unconditionally. Results[0] is the
+// idle check, which is simply the first one registered, so an abort caused by
+// any other check printed the idle check's text instead -- and when idle had
+// passed, that text is a description of a healthy machine. The operator was
+// told "pre-flight checks failed: CPU idle (0.4% utilization), GPU idle (0.0%
+// utilization)", which reads as a contradiction and names nothing to fix.
+func preflightFailureReason(pf syscheck.PreflightResult) string {
+	var reasons []string
+	for _, r := range pf.Results {
+		if !r.Failed {
+			continue
+		}
+		msg := r.Message
+		if msg == "" {
+			msg = r.Name + " check failed"
+		}
+		reasons = append(reasons, msg)
+	}
+	if len(reasons) == 0 {
+		// Fail closed, but say so honestly rather than blaming a passing check.
+		return "a check failed without reporting a reason"
+	}
+	return strings.Join(reasons, "; ")
 }

@@ -1,8 +1,11 @@
 package serveprofiles
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/lazypower/spark-tools/internal/fingerprint"
 	"github.com/lazypower/spark-tools/internal/serving"
 )
 
@@ -13,10 +16,30 @@ type CompatRequest struct {
 	Capabilities []serving.Capability
 	Facts        serving.ArtifactFacts
 	Profile      ArchProfile
+	// Target is the environment the launch is emitted for. Some footguns are a
+	// property of the SILICON rather than the model: a quantization format ships
+	// vendor-specific kernels, so whether an artifact can load at all depends on
+	// the accelerator it is pointed at. Without this dimension the rule set is
+	// accelerator-blind and cannot express that class of rejection.
+	Target fingerprint.Fingerprint
 }
 
 func (r CompatRequest) wants(c serving.Capability) bool {
 	return slices.Contains(r.Capabilities, c)
+}
+
+// acceleratorVendor returns the vendor dimension of the target accelerator
+// fingerprint, or "" when the target does not carry one in vendor:arch:compute
+// form.
+//
+// Rules must treat "" as "unknown, do not fire". An accelerator we cannot parse
+// is not evidence of incompatibility, and rejecting on ignorance would break
+// every caller using a free-form target string.
+func (r CompatRequest) acceleratorVendor() string {
+	if i := strings.IndexByte(r.Target.Accelerator, ':'); i > 0 {
+		return r.Target.Accelerator[:i]
+	}
+	return ""
 }
 
 // CompatRule is a declarative negative-compatibility rule (§3, codex #4):
@@ -33,6 +56,14 @@ type CompatRule struct {
 	Remedy string
 }
 
+// nvidiaNativeQuants lists the quantization methods whose kernels exist only on
+// NVIDIA silicon. Adding a vendor-specific quant term to the vocabulary means
+// adding it here too, or the accelerator gate silently stops covering it.
+var nvidiaNativeQuants = []serving.QuantMethod{
+	serving.QuantNVFP4,
+	serving.QuantModelOptMixed,
+}
+
 // CompatRules is the v1 request-validation rule set, evaluated at resolution;
 // any violation rejects the request (no partial/footgun launch). It holds the
 // three production failure classes the campaign learned the hard way plus the
@@ -41,6 +72,39 @@ type CompatRule struct {
 // artifact can't actually serve must reject, not silently emit a server that
 // lacks it.
 var CompatRules = []CompatRule{
+	// Quantization methods whose vLLM kernels are NVIDIA-only. Pointing one of
+	// these artifacts at a non-NVIDIA accelerator emits a launch that cannot load
+	// the weights at all, and the spec looks valid right up to that point.
+	//
+	//   - NVFP4 is NVIDIA's FP4: Blackwell-native, CUDA-only kernels. The vendor
+	//     is in the name of the format.
+	//   - ModelOpt MIXED_PRECISION is the same family wearing a different term.
+	//     ModelOpt is NVIDIA's own quantization toolkit, and the shipped
+	//     checkpoints (the Qwen3.6 NVFP4 builds) are FP4 weights with FP8
+	//     linear-attention projections. It is a distinct METHOD from NVFP4 --
+	//     which is why it is a separate vocabulary term -- but not a distinct
+	//     vendor, so gating only NVFP4 would let the same footgun through under
+	//     the newer name.
+	//
+	// Deliberately does NOT include plain FP8. gfx1151 has no native FP8, but
+	// "unverified on this accelerator" is not the claim "cannot work": vLLM has
+	// non-native FP8 paths, and blocking on an untested hypothesis would be the
+	// same error as encoding a guessed memory ceiling. A measurement showing FP8
+	// failing is what earns a rule here; a suspicion does not.
+	{
+		Name: "nvidia-native-quant-requires-nvidia",
+		Violated: func(r CompatRequest) (bool, string) {
+			if !slices.Contains(nvidiaNativeQuants, r.Facts.Quant) {
+				return false, ""
+			}
+			v := r.acceleratorVendor()
+			if v == "" || v == "nvidia" {
+				return false, ""
+			}
+			return true, fmt.Sprintf("artifact quantization %q has NVIDIA-only kernels but the target accelerator %q is %s", r.Facts.Quant, r.Target.Accelerator, v)
+		},
+		Remedy: "serve a bf16/fp16 or vendor-neutral quantization on this accelerator, or emit for an NVIDIA target",
+	},
 	// Vision requires a multimodal processor in the artifact. The arch profile may
 	// claim vision (the arch supports it), but a text-only build of that arch ships
 	// no processor — vLLM would then serve text while the caller believes it

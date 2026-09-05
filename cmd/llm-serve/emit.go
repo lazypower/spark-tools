@@ -29,6 +29,8 @@ func emitCmd() *cobra.Command {
 		dtype       string
 		image       string
 		accelerator string
+		ctrEngine   string
+		engineCmd   string
 		target      string
 		port        int
 		mounts      []string
@@ -46,6 +48,8 @@ func emitCmd() *cobra.Command {
 			if err := validateBudgetFlags(cmd); err != nil {
 				return err
 			}
+			accelerator = resolveAccelerator(accelerator, cmd.ErrOrStderr())
+			ctrEngine = resolveContainerEngine(ctrEngine, cmd.ErrOrStderr())
 			capList, err := parseCaps(caps)
 			if err != nil {
 				return err
@@ -73,7 +77,7 @@ func emitCmd() *cobra.Command {
 				Dtype:        dtype,
 				Target:       llmserve.Fingerprint{Engine: image, Accelerator: accelerator},
 			}
-			host := servespec.Host{Image: imageRef(image), Port: port, Volumes: mountList}
+			host := servespec.Host{Image: imageRef(image), Port: port, Volumes: mountList, Accelerator: accelerator, ContainerEngine: ctrEngine, Command: strings.Fields(engineCmd)}
 
 			res, err := llmserve.Emit(req, facts, tgt, host)
 			if err != nil {
@@ -98,7 +102,9 @@ func emitCmd() *cobra.Command {
 	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to the hardware default, then vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&dtype, "dtype", "", "vLLM --dtype (default auto)")
 	f.StringVar(&image, "image", "", "engine image digest/tag, e.g. vllm/vllm-openai@v0.23.0 (required) — also the fingerprint engine")
-	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint (vendor:arch)")
+	f.StringVar(&accelerator, "accelerator", "", acceleratorFlagUsage)
+	f.StringVar(&ctrEngine, "container-engine", "", containerEngineFlagUsage)
+	f.StringVar(&engineCmd, "engine-command", "", "argv prefix between the image and the flags, for images whose entrypoint does not start the server (e.g. \"vllm serve\" for the gfx1151 ROCm image). Empty suits vllm/vllm-openai, whose entrypoint is already vllm serve")
 	f.StringVar(&target, "target", "compose", "render target: compose, docker-run, quadlet")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -51,7 +52,15 @@ func listCmd() *cobra.Command {
 					if !f.Complete {
 						status = "…"
 					}
-					line := fmt.Sprintf("    %s %-10s %s", status, f.Quantization, formatSize(f.Size))
+					// Quantization identifies a GGUF file usefully, but it is
+					// empty for everything else -- so a safetensors listing
+					// rendered only a checkmark and a size, with no way to tell
+					// which file each row was. Fall back to the filename.
+					label := f.Quantization
+					if label == "" {
+						label = filepath.Base(f.LocalPath)
+					}
+					line := fmt.Sprintf("    %s %-14s %s", status, label, formatSize(f.Size))
 					if showPath {
 						line += "  " + dimStyle.Render(f.LocalPath)
 					}
@@ -70,7 +79,9 @@ func listCmd() *cobra.Command {
 }
 
 func pathCmd() *cobra.Command {
-	return &cobra.Command{
+	var dirOnly bool
+
+	cmd := &cobra.Command{
 		Use:   "path <model_id> [filename]",
 		Short: "Print the local path to a downloaded model file",
 		Args:  cobra.RangeArgs(1, 2),
@@ -91,8 +102,22 @@ func pathCmd() *cobra.Command {
 				return fmt.Errorf("model %q not found locally", args[0])
 			}
 
+			// A serve-ready artifact is addressed by its DIRECTORY, not by one
+			// file inside it: `llm-serve emit --model-dir` and vLLM both want
+			// the folder. Without this the caller has to know that a bare path
+			// returns whichever file sorts first -- config.json for a
+			// safetensors pull -- and wrap the call in dirname.
+			if dirOnly {
+				fmt.Println(filepath.Dir(path))
+				return nil
+			}
+
 			fmt.Println(path)
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&dirOnly, "dir", false, "print the containing directory instead of a file path (what `llm-serve emit --model-dir` takes)")
+
+	return cmd
 }

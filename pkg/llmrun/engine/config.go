@@ -25,7 +25,7 @@ func BuildCommand(cfg RunConfig, caps Capabilities) (cmd []string, warnings []st
 
 	// GPU offload on CPU-only build.
 	if cfg.GPULayers == -1 && caps.Backend == "cpu" {
-		return nil, nil, fmt.Errorf("llama.cpp was built without GPU support. Rebuild with CUDA or set gpu-layers to 0")
+		return nil, nil, fmt.Errorf("llama.cpp was built without GPU support. Rebuild with a GPU backend (CUDA, ROCm/HIP, Metal, or Vulkan) or set gpu-layers to 0")
 	}
 
 	// --- Select binary ---

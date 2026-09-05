@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ func dirs() (stateDir, specDir, watchdogDir string) {
 func upCmd() *cobra.Command {
 	var (
 		modelDir, name, served, image, accelerator, target, repoTree string
+		ctrEngine, engineCmd                                         string
 		caps, mounts                                                 []string
 		ctx, port, maxNumSeqs                                        int
 		gpuMemUtil                                                   float64
@@ -43,12 +45,19 @@ func upCmd() *cobra.Command {
 			"against the served model + watchdog). Fail-closed: a bring-up that does not confirm\n" +
 			"is torn down (or kept as a recovery handle if teardown can't be confirmed).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if target != "" && target != "compose" {
-				return fmt.Errorf("B1 drives compose only; --target %q not supported", target)
+			// The driver applies the spec, so only targets a driver exists for
+			// are accepted. An explicit target must also agree with the engine:
+			// handing compose YAML to the podman driver (or the reverse) fails
+			// in the driver rather than at the CLI, which is a worse place to
+			// find out.
+			if target != "" && target != "compose" && target != "podman" {
+				return fmt.Errorf("up drives compose or podman; --target %q not supported", target)
 			}
 			if err := validateBudgetFlags(cmd); err != nil {
 				return err
 			}
+			accelerator = resolveAccelerator(accelerator, cmd.ErrOrStderr())
+			ctrEngine = resolveContainerEngine(ctrEngine, cmd.ErrOrStderr())
 			capList, err := parseCaps(caps)
 			if err != nil {
 				return err
@@ -68,18 +77,20 @@ func upCmd() *cobra.Command {
 			}
 
 			plan, resolved, err := llmserve.BuildPlan(llmserve.PlanRequest{
-				Name:         name,
-				ServedName:   served,
-				Facts:        facts,
-				Capabilities: capList,
-				ContextLen:   ctx,
-				GPUMemUtil:   gpuMemUtil,
-				MaxNumSeqs:   maxNumSeqs,
-				Image:        image,
-				Accelerator:  accelerator,
-				Port:         port,
-				Mounts:       mountList,
-				WatchdogDir:  watchdogDir,
+				Name:            name,
+				ServedName:      served,
+				Facts:           facts,
+				Capabilities:    capList,
+				ContextLen:      ctx,
+				GPUMemUtil:      gpuMemUtil,
+				MaxNumSeqs:      maxNumSeqs,
+				Image:           image,
+				Accelerator:     accelerator,
+				ContainerEngine: ctrEngine,
+				Command:         strings.Fields(engineCmd),
+				Port:            port,
+				Mounts:          mountList,
+				WatchdogDir:     watchdogDir,
 			})
 			if err != nil {
 				return err
@@ -88,7 +99,7 @@ func upCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
 
-			orch := llmserve.NewOrchestrator(stateDir, specDir)
+			orch := llmserve.NewOrchestratorFor(stateDir, specDir, ctrEngine)
 			orch.BootTimeout = timeout // 0 ⇒ the orchestrator's generous default
 			fmt.Fprintf(cmd.ErrOrStderr(), "bringing up %q (waiting for confirmed serving; large models cold-start in minutes, fail-fast on crash)...\n", name)
 			res, err := orch.Up(context.Background(), plan)
@@ -108,10 +119,12 @@ func upCmd() *cobra.Command {
 	f.Float64Var(&gpuMemUtil, "gpu-mem-util", 0, "vLLM --gpu-memory-utilization fraction (0,1]; 0/unset uses the whole box (vLLM 0.9). Cap it to co-reside instances")
 	f.IntVar(&maxNumSeqs, "max-num-seqs", 0, "vLLM --max-num-seqs (max concurrent sequences); 0/unset defers to vLLM's own. Lower it to shrink a co-resident member's KV footprint")
 	f.StringVar(&image, "image", "", "engine image, e.g. vllm/vllm-openai@v0.23.0 (required)")
-	f.StringVar(&accelerator, "accelerator", "nvidia:gb10:sm121", "target accelerator fingerprint")
+	f.StringVar(&accelerator, "accelerator", "", acceleratorFlagUsage)
+	f.StringVar(&ctrEngine, "container-engine", "", containerEngineFlagUsage)
+	f.StringVar(&engineCmd, "engine-command", "", "argv prefix between the image and the flags, for images whose entrypoint does not start the server (e.g. \"vllm serve\")")
 	f.IntVar(&port, "port", 8000, "host port to map to container :8000")
 	f.StringArrayVar(&mounts, "mount", nil, "read-only model mount host:container (repeatable)")
-	f.StringVar(&target, "target", "compose", "render target (B1: compose only)")
+	f.StringVar(&target, "target", "", "render target: compose or podman; unset follows the detected container engine")
 	f.StringVar(&repoTree, "repo-tree", "", "saved hfetch tree listing (JSON) to run the completeness gate")
 	f.DurationVar(&timeout, "timeout", 0, "ceiling for reaching confirmed serving (0 = default 20m; a crashed container fails fast regardless)")
 	_ = cmd.MarkFlagRequired("model-dir")

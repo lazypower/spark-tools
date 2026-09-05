@@ -62,11 +62,49 @@ func DetectBinaries(llamaDir string) (*Capabilities, error) {
 		probeBin = cliPath
 	}
 	if probeBin != "" {
-		if ver, err := probeVersion(probeBin); err == nil {
-			caps.Version = ver
+		// The RAW version output is kept, not just the parsed version string.
+		// llama.cpp announces its backend in the ggml init lines it writes to
+		// stderr on any invocation ("ggml_cuda_init: found 1 ROCm devices"),
+		// and --help carries none of it: a current llama-server --help is 730
+		// lines of flag reference with no mention of ROCm, HIP, gfx or CUDA.
+		// Detecting the backend from help text alone therefore always answers
+		// "cpu", which then refuses GPU offload on a perfectly good GPU build.
+		var backendText string
+		if raw, err := probeVersionRaw(probeBin); err == nil {
+			caps.Version = ParseVersionOutput(raw)
+			backendText = raw
 		}
 		if helpText, err := probeHelp(probeBin); err == nil {
 			parseCapabilities(helpText, caps)
+			backendText += "\n" + helpText
+		}
+
+		// Ask the binary what devices it can actually use. This is the
+		// authoritative answer and the only one that holds on current builds:
+		// when a GPU initializes successfully llama.cpp prints NOTHING about
+		// its backend in --version or --help, so sniffing that prose reports
+		// "cpu" for a perfectly good GPU build and then refuses offload. The
+		// backend name is the device prefix ("ROCm0:", "CUDA0:").
+		if devices, err := probeDevices(probeBin); err == nil {
+			if b := DetectBackendFromDevices(devices); b != "" {
+				caps.Backend = b
+				applyBackendArch(devices+"\n"+backendText, caps)
+			} else if listedNoDevices(devices) {
+				// The binary answered and explicitly listed no device. That is
+				// a real CPU-only answer, not a failed probe.
+				caps.Backend = "cpu"
+			}
+			// A listing we could not parse deliberately falls through to the
+			// prose-sniffed backend above rather than being called "cpu".
+			// This detector is verified against ROCm and CPU builds on real
+			// hardware but NOT against CUDA, and the two mistakes are not
+			// symmetric: guessing "cpu" for an unparsed listing would refuse
+			// GPU offload on a working NVIDIA box, while falling back merely
+			// restores the previous behavior. Fail toward the old path.
+		} else if backendText != "" {
+			// Older builds without --list-devices: fall back to the prose.
+			caps.Backend = DetectBackend(backendText)
+			applyBackendArch(backendText, caps)
 		}
 	}
 
@@ -126,13 +164,20 @@ func isExecutable(path string) bool {
 	return !info.IsDir() && info.Mode()&0111 != 0
 }
 
-// probeVersion runs `binary --version` and parses the version string.
-func probeVersion(binaryPath string) (string, error) {
+// probeVersionRaw runs `binary --version` and returns its COMBINED output
+// unparsed, because the backend marker lives in the ggml init lines on stderr
+// rather than in the version string itself.
+func probeVersionRaw(binaryPath string) (string, error) {
 	out, err := exec.Command(binaryPath, "--version").CombinedOutput()
 	if err != nil {
+		// llama.cpp reports a non-zero exit for --version on some builds while
+		// still printing everything we need.
+		if len(out) > 0 {
+			return string(out), nil
+		}
 		return "", fmt.Errorf("version probe failed: %w", err)
 	}
-	return ParseVersionOutput(string(out)), nil
+	return string(out), nil
 }
 
 // probeHelp runs `binary --help` and returns the help text.
@@ -195,22 +240,34 @@ func parseCapabilities(helpText string, caps *Capabilities) {
 	caps.MLock = strings.Contains(lower, "--mlock")
 	caps.MMap = strings.Contains(lower, "--mmap")
 
-	// Detect backend from help text or version string.
+	// Backend and accelerator arch are resolved by the caller over the combined
+	// version+help text (applyBackendArch), because --help alone carries no
+	// backend marker on current builds.
 	caps.Backend = DetectBackend(helpText)
-
-	// Try to detect CUDA compute capability.
-	if caps.Backend == "cuda" {
-		if cc := detectCUDACompute(helpText); cc != "" {
-			caps.CUDACompute = cc
-		}
-	}
+	applyBackendArch(helpText, caps)
 }
+
+// rocmMarker matches the fingerprints of a ROCm/HIP llama.cpp build: the ROCm
+// name itself, the HIP runtime, hipBLAS, or a gfx target string.
+//
+// The markers are word-bounded on purpose. A bare "HIP" substring match would
+// fire on ordinary words in help text -- "chipset" contains it -- and
+// misclassify a CPU build as a GPU one.
+var rocmMarker = regexp.MustCompile(`\bROCM\b|\bHIP\b|\bHIPBLAS\b|\bGFX[0-9A-F]{3,4}\b`)
 
 // DetectBackend determines the llama.cpp backend from version/help text.
 // Exported for testing.
+//
+// ROCm is tested BEFORE CUDA, and the order is load-bearing. llama.cpp compiles
+// its HIP backend from the same ggml-cuda sources, so a ROCm build's output
+// still carries "CUDA" strings; checking CUDA first would classify every AMD
+// build as CUDA. The converse never happens -- a genuine CUDA build does not
+// mention ROCm, HIP, or a gfx target -- so leading with ROCm is safe.
 func DetectBackend(text string) string {
 	upper := strings.ToUpper(text)
 	switch {
+	case rocmMarker.MatchString(upper):
+		return "rocm"
 	case strings.Contains(upper, "CUDA"):
 		return "cuda"
 	case strings.Contains(upper, "METAL"):
@@ -230,4 +287,79 @@ func detectCUDACompute(text string) string {
 		return m
 	}
 	return ""
+}
+
+// detectROCmArch tries to find an AMD gfx target string (e.g., "gfx1151") in the
+// help/version text. It is the ROCm counterpart of detectCUDACompute.
+func detectROCmArch(text string) string {
+	re := regexp.MustCompile(`(?i)gfx[0-9a-f]{3,4}`)
+	if m := re.FindString(text); m != "" {
+		return strings.ToLower(m)
+	}
+	return ""
+}
+
+// applyBackendArch records the accelerator architecture the build targets, for
+// whichever backend was detected.
+func applyBackendArch(text string, caps *Capabilities) {
+	switch caps.Backend {
+	case "cuda":
+		if cc := detectCUDACompute(text); cc != "" {
+			caps.CUDACompute = cc
+		}
+	case "rocm":
+		if arch := detectROCmArch(text); arch != "" {
+			caps.ROCmArch = arch
+		}
+	}
+}
+
+// deviceLine matches an entry from `llama-server --list-devices`, whose backend
+// prefix names the backend:
+//
+//	ROCm0: Radeon 8060S Graphics (64038 MiB, 64034 MiB free)
+//	CUDA0: NVIDIA GB10 (131072 MiB, 130000 MiB free)
+var deviceLine = regexp.MustCompile(`(?m)^\s+([A-Za-z]+)\d+:\s`)
+
+// probeDevices runs `binary --list-devices` and returns its combined output.
+func probeDevices(binaryPath string) (string, error) {
+	out, err := exec.Command(binaryPath, "--list-devices").CombinedOutput()
+	if err != nil {
+		if len(out) > 0 {
+			return string(out), nil
+		}
+		return "", fmt.Errorf("device probe failed: %w", err)
+	}
+	return string(out), nil
+}
+
+// devicesListed reports whether the output is a real device listing, so an
+// empty list can be distinguished from a binary that does not support the flag.
+func devicesListed(out string) bool {
+	return strings.Contains(strings.ToLower(out), "available devices")
+}
+
+// listedNoDevices reports the narrower fact that the binary answered AND said
+// it has no devices. Verified against both a ROCm build with the GPU detached
+// and a CPU-only build, which print the same "(none)" entry.
+//
+// This is deliberately stricter than devicesListed: a listing whose device
+// lines we simply failed to parse is NOT evidence of a CPU-only build, and
+// treating it as one would refuse GPU offload on a working accelerator.
+func listedNoDevices(out string) bool {
+	return devicesListed(out) && strings.Contains(out, "(none)")
+}
+
+// DetectBackendFromDevices returns the backend named by the first device entry,
+// or "" when the output lists no devices (or is not a device listing at all).
+// Exported for testing.
+func DetectBackendFromDevices(out string) string {
+	if !devicesListed(out) {
+		return ""
+	}
+	m := deviceLine.FindStringSubmatch(out)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.ToLower(m[1])
 }

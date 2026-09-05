@@ -127,13 +127,13 @@ func TestDetectBackend(t *testing.T) {
 
 func TestParseCapabilities(t *testing.T) {
 	tests := []struct {
-		name          string
-		helpText      string
-		wantFlash     bool
-		wantNUMA      bool
-		wantMLock     bool
-		wantMMap      bool
-		wantBackend   string
+		name        string
+		helpText    string
+		wantFlash   bool
+		wantNUMA    bool
+		wantMLock   bool
+		wantMMap    bool
+		wantBackend string
 	}{
 		{
 			name: "all capabilities present with CUDA",

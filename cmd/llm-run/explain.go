@@ -82,8 +82,11 @@ var explanations = map[string]string{
   Number of model layers to offload to GPU memory. Set to -1 to offload
   all layers. Set to 0 for CPU-only inference.
 
-  On unified memory architectures (DGX Spark), all layers are offloaded
-  by default since CPU and GPU share the same memory pool.
+  On unified memory architectures (DGX Spark GB10, AMD Strix Halo), all
+  layers are offloaded by default since CPU and GPU share the same memory
+  pool. Note that "shared" does not mean "all of it": the accelerator sees a
+  carve-out of system RAM, ~62.5 GiB of 125 GiB on Strix Halo, and that pool
+  is what a model has to fit in.
 
   Default: -1 (all) if GPU detected, 0 if CPU-only.`,
 

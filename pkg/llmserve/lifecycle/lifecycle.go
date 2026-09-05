@@ -320,7 +320,7 @@ func (o *Orchestrator) Down(ctx context.Context, name string) error {
 		return o.Store.Delete(name)
 	}
 	o.markCleanupRequired(in.Desired)
-	return fmt.Errorf("could not confirm teardown of %q; kept as recovery handle (run `recover`, or `forget --force`)", name)
+	return unconfirmedTeardownError(name)
 }
 
 // Forget abandons a manifest stuck in cleanup_required. It prefers confirmed
@@ -434,4 +434,15 @@ func (o *Orchestrator) List(ctx context.Context) ([]InstanceStatus, error) {
 		out = append(out, InstanceStatus{in, Reconcile(ctx, o.Runtime, o.Prober, in.Desired, in.Desired.Endpoint)})
 	}
 	return out, nil
+}
+
+// unconfirmedTeardownError is the fail-closed teardown message.
+//
+// The remedy must name a flag that exists: `forget` takes --accept-orphan,
+// never --force, so an operator following this line verbatim used to get
+// "unknown flag: --force" at the exact moment they were trying to clean up a
+// failed bring-up. It also names the instance, so the suggested command is
+// copy-pasteable rather than a template to fill in.
+func unconfirmedTeardownError(name string) error {
+	return fmt.Errorf("could not confirm teardown of %q; kept as recovery handle (run `recover %s`, or `forget %s --accept-orphan`)", name, name, name)
 }
